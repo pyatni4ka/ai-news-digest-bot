@@ -209,6 +209,21 @@ class Repository:
         with self._connect() as conn:
             return conn.execute(query, tuple(params)).fetchall()
 
+    def get_news_items_by_ids(self, item_ids: list[int]) -> list[sqlite3.Row]:
+        if not item_ids:
+            return []
+        placeholders = ", ".join("?" for _ in item_ids)
+        query = f"""
+            SELECT id, dedup_key, source_key, external_id, title, summary, body, url, published_at,
+                   collected_at, tags_json, categories_json, importance, images_json, raw_json
+            FROM news_items
+            WHERE id IN ({placeholders})
+        """
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(item_ids)).fetchall()
+        order = {item_id: index for index, item_id in enumerate(item_ids)}
+        return sorted(rows, key=lambda row: order.get(int(row["id"]), 10_000))
+
     def get_top_links(
         self,
         start_at: datetime,

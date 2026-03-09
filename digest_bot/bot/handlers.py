@@ -22,6 +22,7 @@ def build_router(service: DigestService) -> Router:
 
     @router.message(Command("digest_now"))
     @router.message(F.text == "Сейчас")
+    @router.message(F.text == "Дайджест сейчас")
     async def digest_now_handler(message: Message) -> None:
         if not service.is_admin_chat(message.chat.id):
             return
@@ -118,7 +119,7 @@ def build_router(service: DigestService) -> Router:
             case "sec":
                 digest_id = int(action[2])
                 section_key = action[3]
-                await callback.message.answer(service.render_digest_section(digest_id, section_key))
+                await service.send_digest_section(callback.message.chat.id, digest_id, section_key)
                 await callback.answer()
             case "links":
                 digest_id = int(action[2])
@@ -159,4 +160,4 @@ async def _send_section(message: Message, service: DigestService, key: str) -> N
     digest_id = service.latest_digest_id()
     if digest_id is None:
         digest_id = await service.refresh_and_build_current_digest()
-    await message.answer(service.render_digest_section(digest_id, key))
+    await service.send_digest_section(message.chat.id, digest_id, key)

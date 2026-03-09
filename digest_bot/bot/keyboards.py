@@ -12,7 +12,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="Сейчас"),
+                KeyboardButton(text="Дайджест сейчас"),
                 KeyboardButton(text="Главное"),
                 KeyboardButton(text="Модели"),
             ],
@@ -36,48 +36,58 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarkup:
-    model_links = payload.get("summary_payload", {}).get("model_links", [])
-    resource_links = payload.get("summary_payload", {}).get("resource_links", [])
     rows = [
         [
             InlineKeyboardButton(text="Подробнее", callback_data=f"dg:more:{digest_id}"),
-            InlineKeyboardButton(text="Только coding", callback_data=f"dg:sec:{digest_id}:coding"),
+            InlineKeyboardButton(text="Дайджест сейчас", callback_data="dg:refresh:now"),
+        ],
+        [
+            InlineKeyboardButton(text="Модели", callback_data=f"dg:sec:{digest_id}:models"),
+            InlineKeyboardButton(text="Coding", callback_data=f"dg:sec:{digest_id}:coding"),
         ],
         [
             InlineKeyboardButton(
-                text="Только dev tools",
+                text="Dev tools",
                 callback_data=f"dg:sec:{digest_id}:dev_tools",
             ),
             InlineKeyboardButton(
-                text="Только vibe coding",
+                text="Vibe coding",
                 callback_data=f"dg:sec:{digest_id}:vibe_coding",
             ),
         ],
         [
-            InlineKeyboardButton(text="Ресурсы", callback_data=f"dg:links:{digest_id}:resources"),
+            InlineKeyboardButton(text="Сравнения", callback_data=f"dg:sec:{digest_id}:comparisons"),
+            InlineKeyboardButton(text="Ресурсы", callback_data=f"dg:sec:{digest_id}:resources"),
         ],
         [
             InlineKeyboardButton(text="Сохранить", callback_data=f"dg:save:{digest_id}"),
             InlineKeyboardButton(text="Меньше такого", callback_data=f"dg:noise:{digest_id}"),
         ],
-        [InlineKeyboardButton(text="Обновить сейчас", callback_data="dg:refresh:now")],
     ]
-    if model_links:
-        rows.insert(
-            2,
-            [InlineKeyboardButton(text="Открыть модель", url=model_links[0])],
-        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def digest_static_keyboard(payload: dict) -> InlineKeyboardMarkup | None:
-    model_links = payload.get("summary_payload", {}).get("model_links", [])
-    resource_links = payload.get("summary_payload", {}).get("resource_links", [])
+    sections = payload.get("sections", {})
+    section_specs = [
+        ("Модели", sections.get("models", {}).get("links", [])),
+        ("Dev tools", sections.get("dev_tools", {}).get("links", [])),
+        ("Coding", sections.get("coding", {}).get("links", [])),
+        ("Vibe coding", sections.get("vibe_coding", {}).get("links", [])),
+        ("Сравнения", sections.get("comparisons", {}).get("links", [])),
+        ("Ресурсы", sections.get("resources", {}).get("links", [])),
+    ]
     rows: list[list[InlineKeyboardButton]] = []
-    if model_links:
-        rows.append([InlineKeyboardButton(text="Открыть модель", url=model_links[0])])
-    if resource_links:
-        rows.append([InlineKeyboardButton(text="Открыть ресурс", url=resource_links[0])])
+    current_row: list[InlineKeyboardButton] = []
+    for label, links in section_specs:
+        if not links:
+            continue
+        current_row.append(InlineKeyboardButton(text=label, url=links[0]))
+        if len(current_row) == 2:
+            rows.append(current_row)
+            current_row = []
+    if current_row:
+        rows.append(current_row)
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 

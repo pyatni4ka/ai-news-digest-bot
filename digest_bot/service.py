@@ -13,7 +13,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputMediaPhoto
 
-from digest_bot.bot.keyboards import digest_inline_keyboard, digest_static_keyboard
+from digest_bot.bot.keyboards import digest_inline_keyboard, digest_static_keyboard, links_keyboard
 from digest_bot.collectors.rss import RSSCollector
 from digest_bot.collectors.telegram import TelegramCollector
 from digest_bot.collectors.webpage import WebpageCollector
@@ -21,7 +21,7 @@ from digest_bot.config import Settings, load_default_sources
 from digest_bot.models import Digest, NewsItem, Source
 from digest_bot.pipeline.classify import classify_items
 from digest_bot.pipeline.dedup import deduplicate
-from digest_bot.pipeline.digest_builder import build_digest, compute_window_with_hours, select_sections
+from digest_bot.pipeline.digest_builder import build_digest, compute_window_with_hours, gather_images, select_sections
 from digest_bot.storage import Repository
 from digest_bot.summarizers.fallback import FallbackSummarizer
 from digest_bot.summarizers.http_compat import OpenAICompatibleSummarizer
@@ -131,7 +131,7 @@ class DigestService:
         if row is None:
             return
         text, payload = self.repo.hydrate_digest(row)
-        await self._send_images(payload.get("image_paths", []))
+        await self._send_images(self.settings.admin_chat_id, payload.get("image_paths", []))
         reply_markup = (
             digest_inline_keyboard(int(row["id"]), payload)
             if self.settings.interactive_bot
@@ -142,6 +142,25 @@ class DigestService:
             text=self._format_digest_html(str(row["title"]), text, str(row["slot"])),
             parse_mode="HTML",
             reply_markup=reply_markup,
+        )
+
+    async def send_digest_section(self, chat_id: int, digest_id: int, section_key: str) -> None:
+        row = self.repo.get_digest(digest_id)
+        if row is None:
+            await self.bot.send_message(chat_id=chat_id, text="Дайджест пока не найден.")
+            return
+        _, payload = self.repo.hydrate_digest(row)
+        section = payload.get("sections", {}).get(section_key)
+        if section is None:
+            await self.bot.send_message(chat_id=chat_id, text="Для этого окна раздел пуст.")
+            return
+        images = self.get_section_images(digest_id, section_key)
+        if images:
+            await self._send_images(chat_id, images)
+        await self.bot.send_message(
+            chat_id=chat_id,
+            text=section["paragraph"][:4000],
+            reply_markup=links_keyboard(section.get("links", []), "Открыть"),
         )
 
     def render_digest_message(self, digest_id: int) -> tuple[str, dict]:
@@ -183,6 +202,19 @@ class DigestService:
         if link_kind == "models":
             return ("Топ ссылок по моделям и релизам.", summary_payload.get("model_links", []))
         return ("Ссылок пока нет.", [])
+
+    def get_section_images(self, digest_id: int, section_key: str, limit: int = 6) -> list[str]:
+        row = self.repo.get_digest(digest_id)
+        if row is None:
+            return []
+        _, payload = self.repo.hydrate_digest(row)
+        section = payload.get("sections", {}).get(section_key)
+        if section is None:
+            return []
+        item_ids = [int(item_id) for item_id in section.get("item_ids", []) if item_id]
+        rows = self.repo.get_news_items_by_ids(item_ids)
+        items = [self._row_to_item(item_row) for item_row in rows]
+        return gather_images(items, min(limit, self.settings.max_images_per_digest))
 
     def save_favorite(self, digest_id: int) -> None:
         self.repo.save_favorite(digest_id)
@@ -230,7 +262,7 @@ class DigestService:
         local_now = datetime.now(UTC).astimezone(ZoneInfo(self.settings.timezone))
         return "morning" if local_now.hour < self.settings.evening_hour else "evening"
 
-    async def _send_images(self, images: list[str]) -> None:
+    async def _send_images(self, chat_id: int, images: list[str]) -> None:
         if not images:
             return
         media: list[InputMediaPhoto] = []
@@ -240,7 +272,7 @@ class DigestService:
         if media:
             try:
                 await self.bot.send_media_group(
-                    chat_id=self.settings.admin_chat_id,
+                    chat_id=chat_id,
                     media=media[:10],
                 )
             except TelegramBadRequest:
@@ -248,7 +280,7 @@ class DigestService:
                 for item in media[:10]:
                     try:
                         await self.bot.send_photo(
-                            chat_id=self.settings.admin_chat_id,
+                            chat_id=chat_id,
                             photo=item.media,
                         )
                     except TelegramBadRequest:

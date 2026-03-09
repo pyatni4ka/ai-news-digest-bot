@@ -86,5 +86,19 @@ jobs:
             echo "EVENING_HOUR=$EVENING_HOUR"
           } >> "$GITHUB_ENV"
 
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          missing=()
+          for key in BOT_TOKEN ADMIN_CHAT_ID TG_API_ID TG_API_HASH TG_PHONE TG_SESSION_STRING OPENROUTER_API_KEY; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing GitHub Actions secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Run digest
         run: ai-news-digest run-slot --slot "$DIGEST_SLOT"

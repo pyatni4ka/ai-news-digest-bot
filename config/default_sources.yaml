@@ -1,0 +1,294 @@
+sources:
+  - key: telegram:@vibecoding_tg
+    name: "@vibecoding_tg"
+    kind: telegram
+    location: "@vibecoding_tg"
+    priority: 5
+    tags: ["telegram", "coding", "vibe_coding"]
+    config:
+      entity: "@vibecoding_tg"
+
+  - key: telegram:@naebnet
+    name: "@naebnet"
+    kind: telegram
+    location: "@naebnet"
+    priority: 4
+    tags: ["telegram", "tech", "ai"]
+    config:
+      entity: "@naebnet"
+
+  - key: telegram:@bugnotfeature
+    name: "@bugnotfeature"
+    kind: telegram
+    location: "@bugnotfeature"
+    priority: 5
+    tags: ["telegram", "coding", "engineering"]
+    config:
+      entity: "@bugnotfeature"
+
+  - key: telegram:@pekagame
+    name: "@pekagame"
+    kind: telegram
+    location: "@pekagame"
+    priority: 2
+    tags: ["telegram", "tech"]
+    config:
+      entity: "@pekagame"
+
+  - key: telegram:@exploitex
+    name: "@exploitex"
+    kind: telegram
+    location: "@exploitex"
+    priority: 3
+    tags: ["telegram", "security", "tech"]
+    config:
+      entity: "@exploitex"
+
+  - key: telegram:@ai_machinelearning_big_data
+    name: "@ai_machinelearning_big_data"
+    kind: telegram
+    location: "@ai_machinelearning_big_data"
+    priority: 4
+    tags: ["telegram", "ai", "machine_learning"]
+    config:
+      entity: "@ai_machinelearning_big_data"
+
+  - key: telegram:@machinelearning_interview
+    name: "@machinelearning_interview"
+    kind: telegram
+    location: "@machinelearning_interview"
+    priority: 3
+    tags: ["telegram", "ai", "career"]
+    config:
+      entity: "@machinelearning_interview"
+
+  - key: telegram:@bigdatai
+    name: "@bigdatai"
+    kind: telegram
+    location: "@bigdatai"
+    priority: 3
+    tags: ["telegram", "ai", "data"]
+    config:
+      entity: "@bigdatai"
+
+  - key: telegram:@notboring_tech
+    name: "@notboring_tech"
+    kind: telegram
+    location: "@notboring_tech"
+    priority: 4
+    tags: ["telegram", "tech", "ai"]
+    config:
+      entity: "@notboring_tech"
+
+  - key: rss:openai-news
+    name: "OpenAI News"
+    kind: rss
+    location: "https://openai.com/news/rss.xml"
+    priority: 7
+    tags: ["official", "openai", "models"]
+
+  - key: webpage:anthropic-news
+    name: "Anthropic News"
+    kind: webpage
+    location: "https://www.anthropic.com/news"
+    priority: 7
+    tags: ["official", "anthropic", "models"]
+    config:
+      listing_url: "https://www.anthropic.com/news"
+      include_patterns: ["/news/"]
+
+  - key: rss:google-ai-blog
+    name: "Google AI Blog"
+    kind: rss
+    location: "https://blog.google/technology/ai/rss/"
+    priority: 6
+    tags: ["official", "google", "ai"]
+
+  - key: webpage:deepmind-blog
+    name: "Google DeepMind Blog"
+    kind: webpage
+    location: "https://deepmind.google/discover/blog/"
+    priority: 6
+    tags: ["official", "deepmind", "models"]
+    config:
+      listing_url: "https://deepmind.google/discover/blog/"
+      include_patterns: ["/discover/blog/"]
+
+  - key: webpage:mistral-news
+    name: "Mistral AI News"
+    kind: webpage
+    location: "https://mistral.ai/news/"
+    priority: 6
+    tags: ["official", "mistral", "models"]
+    config:
+      listing_url: "https://mistral.ai/news/"
+      include_patterns: ["/news/"]
+
+  - key: webpage:meta-ai-blog
+    name: "Meta AI Blog"
+    kind: webpage
+    location: "https://ai.meta.com/blog/"
+    priority: 5
+    tags: ["official", "meta", "models"]
+    config:
+      listing_url: "https://ai.meta.com/blog/"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:xai-news
+    name: "xAI News"
+    kind: webpage
+    location: "https://x.ai/blog"
+    priority: 6
+    tags: ["official", "xai", "models"]
+    config:
+      listing_url: "https://x.ai/blog"
+      include_patterns: ["/blog/"]
+
+  - key: rss:huggingface-blog
+    name: "Hugging Face Blog"
+    kind: rss
+    location: "https://huggingface.co/blog/feed.xml"
+    priority: 5
+    tags: ["official", "huggingface", "open_source"]
+
+  - key: webpage:cohere-blog
+    name: "Cohere Blog"
+    kind: webpage
+    location: "https://cohere.com/blog"
+    priority: 5
+    tags: ["official", "cohere", "models"]
+    config:
+      listing_url: "https://cohere.com/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:together-blog
+    name: "Together AI Blog"
+    kind: webpage
+    location: "https://www.together.ai/blog"
+    priority: 5
+    tags: ["official", "together", "models"]
+    config:
+      listing_url: "https://www.together.ai/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:replicate-blog
+    name: "Replicate Blog"
+    kind: webpage
+    location: "https://replicate.com/blog"
+    priority: 4
+    tags: ["infra", "models", "open_source"]
+    config:
+      listing_url: "https://replicate.com/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:cursor-blog
+    name: "Cursor Blog"
+    kind: webpage
+    location: "https://cursor.com/blog"
+    priority: 7
+    tags: ["coding", "vibe_coding", "ide"]
+    config:
+      listing_url: "https://cursor.com/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:windsurf-blog
+    name: "Windsurf Blog"
+    kind: webpage
+    location: "https://windsurf.com/blog"
+    priority: 7
+    tags: ["coding", "vibe_coding", "ide"]
+    config:
+      listing_url: "https://windsurf.com/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:github-ai-blog
+    name: "GitHub AI/ML Blog"
+    kind: webpage
+    location: "https://github.blog/ai-and-ml/"
+    priority: 6
+    tags: ["coding", "github", "copilot"]
+    config:
+      listing_url: "https://github.blog/ai-and-ml/"
+      include_patterns: ["/ai-and-ml/", "/changelog/"]
+
+  - key: rss:aider-releases
+    name: "Aider Releases"
+    kind: rss
+    location: "https://github.com/Aider-AI/aider/releases.atom"
+    priority: 6
+    tags: ["coding", "vibe_coding", "github_release"]
+
+  - key: rss:openhands-releases
+    name: "OpenHands Releases"
+    kind: rss
+    location: "https://github.com/All-Hands-AI/OpenHands/releases.atom"
+    priority: 6
+    tags: ["coding", "agents", "github_release"]
+
+  - key: rss:continue-releases
+    name: "Continue Releases"
+    kind: rss
+    location: "https://github.com/continuedev/continue/releases.atom"
+    priority: 5
+    tags: ["coding", "ide", "github_release"]
+
+  - key: rss:openai-python-releases
+    name: "OpenAI Python SDK Releases"
+    kind: rss
+    location: "https://github.com/openai/openai-python/releases.atom"
+    priority: 4
+    tags: ["openai", "sdk", "github_release"]
+
+  - key: rss:anthropic-sdk-releases
+    name: "Anthropic Python SDK Releases"
+    kind: rss
+    location: "https://github.com/anthropics/anthropic-sdk-python/releases.atom"
+    priority: 4
+    tags: ["anthropic", "sdk", "github_release"]
+
+  - key: webpage:vercel-ai-blog
+    name: "Vercel AI Blog"
+    kind: webpage
+    location: "https://vercel.com/blog"
+    priority: 5
+    tags: ["coding", "agents", "tooling"]
+    config:
+      listing_url: "https://vercel.com/blog"
+      include_patterns: ["/blog/"]
+
+  - key: webpage:perplexity-blog
+    name: "Perplexity Blog"
+    kind: webpage
+    location: "https://www.perplexity.ai/hub/blog"
+    priority: 4
+    tags: ["search", "ai", "products"]
+    config:
+      listing_url: "https://www.perplexity.ai/hub/blog"
+      include_patterns: ["/hub/blog/"]
+
+  - key: rss:venturebeat-ai
+    name: "VentureBeat AI"
+    kind: webpage
+    location: "https://venturebeat.com/ai/"
+    priority: 3
+    tags: ["news", "ai"]
+    config:
+      listing_url: "https://venturebeat.com/ai/"
+      include_patterns: ["/ai/"]
+
+  - key: rss:deeplearningai-batch
+    name: "The Batch"
+    kind: webpage
+    location: "https://www.deeplearning.ai/thebatch/"
+    priority: 4
+    tags: ["news", "ai", "research"]
+    config:
+      listing_url: "https://www.deeplearning.ai/thebatch/"
+      include_patterns: ["/the-batch/issue-"]
+
+  - key: rss:simon-willison
+    name: "Simon Willison"
+    kind: rss
+    location: "https://simonwillison.net/atom/everything/"
+    priority: 5
+    tags: ["coding", "agents", "analysis"]

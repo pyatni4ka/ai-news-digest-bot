@@ -1,0 +1,113 @@
+Metadata-Version: 2.4
+Name: ai-news-digest-bot
+Version: 0.1.0
+Summary: Personal Telegram bot for AI news, model updates, and coding-focused digests.
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: aiogram<4.0.0,>=3.15.0
+Requires-Dist: apscheduler<4.0.0,>=3.10.4
+Requires-Dist: beautifulsoup4<5.0.0,>=4.12.3
+Requires-Dist: feedparser<7.0.0,>=6.0.11
+Requires-Dist: httpx<1.0.0,>=0.28.1
+Requires-Dist: openai<2.0.0,>=1.68.2
+Requires-Dist: python-dotenv<2.0.0,>=1.0.1
+Requires-Dist: PyYAML<7.0.0,>=6.0.2
+Requires-Dist: telethon<2.0.0,>=1.39.0
+
+# AI News Digest Bot
+
+Личный Telegram-бот, который:
+
+- читает заданные Telegram-каналы и чаты через Telethon;
+- собирает AI-новости из RSS и официальных блогов;
+- дедуплицирует и раскладывает их по темам;
+- делает краткий русскоязычный дайджест;
+- усиливает блоки по coding и vibe coding;
+- присылает выпуск утром и вечером с кнопками и изображениями.
+
+## Что уже реализовано
+
+- SQLite-хранилище новостей, дайджестов и простых предпочтений.
+- Telegram-источники из твоего стартового списка.
+- Открытые источники: official blogs, RSS, GitHub release feeds, coding/vibe coding tooling.
+- Сбор через `telegram`, `rss`, `webpage`.
+- Inline-кнопки:
+  - `Подробнее`
+  - `Только coding`
+  - `Только vibe coding`
+  - `Ресурсы`
+  - `Открыть модель`
+  - `Сохранить`
+  - `Меньше такого`
+  - `Обновить сейчас`
+- Планировщик утреннего и вечернего запуска.
+
+## Быстрый старт
+
+1. Создай `.env` на основе `.env.example`.
+2. Установи зависимости:
+
+```bash
+python3 -m pip install -e .
+```
+
+3. Авторизуй Telegram-сессию для чтения каналов:
+
+```bash
+ai-news-digest auth-telegram
+```
+
+4. Один раз подтяни новости:
+
+```bash
+ai-news-digest sync
+```
+
+5. Собери тестовый выпуск:
+
+```bash
+ai-news-digest digest --slot manual --send
+```
+
+6. Запусти бота:
+
+```bash
+ai-news-digest bot
+```
+
+## Основные команды бота
+
+- `Сейчас`
+- `Главное`
+- `Модели`
+- `Coding`
+- `Vibe coding`
+- `Сравнения`
+- `Источники`
+- `Настройки`
+- `/add_source @channel`
+
+## Архитектура
+
+- `digest_bot/service.py` — оркестратор.
+- `digest_bot/collectors/` — сбор источников.
+- `digest_bot/pipeline/` — классификация, дедуп, сборка секций.
+- `digest_bot/summarizers/` — OpenAI summary и fallback-режим.
+- `digest_bot/bot/` — кнопки и обработчики Telegram.
+
+## Деплой
+
+Для твоего кейса это рассчитано на простой VPS:
+
+- `python3 -m pip install -e .`
+- `.env`
+- `ai-news-digest auth-telegram`
+- `ai-news-digest bot`
+
+На Oracle Cloud Always Free это должно жить как один долгоживущий процесс.
+
+## Ограничения текущего MVP
+
+- Generic `webpage` collector не знает специфики каждого блога, поэтому часть сайтов может потребовать докрутки selector-логики.
+- `Меньше такого` сейчас работает как грубое усиление фильтра шума, а не как тонкая персонализация по темам.
+- Для приватных Telegram-чатов твой аккаунт должен состоять в этих чатах.

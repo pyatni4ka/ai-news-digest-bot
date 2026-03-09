@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.egg-info/
+*.session
+*.session-journal
+.DS_Store
+data/digest.db
+data/media/*
+!data/media/.gitkeep

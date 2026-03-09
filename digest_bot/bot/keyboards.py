@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -79,10 +81,17 @@ def digest_static_keyboard(payload: dict) -> InlineKeyboardMarkup | None:
     ]
     rows: list[list[InlineKeyboardButton]] = []
     current_row: list[InlineKeyboardButton] = []
+    used_urls: set[str] = set()
+    used_domains: set[str] = set()
     for label, links in section_specs:
-        if not links:
+        selected = _pick_topic_link(links, used_urls, used_domains)
+        if not selected:
             continue
-        current_row.append(InlineKeyboardButton(text=label, url=links[0]))
+        used_urls.add(selected)
+        domain = urlparse(selected).netloc
+        if domain:
+            used_domains.add(domain)
+        current_row.append(InlineKeyboardButton(text=label, url=selected))
         if len(current_row) == 2:
             rows.append(current_row)
             current_row = []
@@ -99,3 +108,13 @@ def links_keyboard(urls: list[str], prefix: str) -> InlineKeyboardMarkup | None:
         for index, url in enumerate(urls[:5])
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _pick_topic_link(links: list[str], used_urls: set[str], used_domains: set[str]) -> str | None:
+    for url in links:
+        if url and url not in used_urls and urlparse(url).netloc not in used_domains:
+            return url
+    for url in links:
+        if url and url not in used_urls:
+            return url
+    return None

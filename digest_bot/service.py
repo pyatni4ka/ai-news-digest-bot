@@ -267,8 +267,9 @@ class DigestService:
             return
         media: list[InputMediaPhoto] = []
         for image in images[: self.settings.max_images_per_digest]:
-            if Path(image).exists():
-                media.append(InputMediaPhoto(media=FSInputFile(image)))
+            photo_input = self._photo_input(image)
+            if photo_input is not None:
+                media.append(InputMediaPhoto(media=photo_input))
         if media:
             try:
                 await self.bot.send_media_group(
@@ -285,6 +286,13 @@ class DigestService:
                         )
                     except TelegramBadRequest:
                         continue
+
+    def _photo_input(self, image: str):
+        if image.startswith(("http://", "https://")):
+            return image
+        if Path(image).exists():
+            return FSInputFile(image)
+        return None
 
     async def _fetch_source(self, source: Source, since: datetime) -> list[NewsItem]:
         if source.kind == "telegram":

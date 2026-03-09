@@ -38,6 +38,35 @@ class BotKeyboardTestCase(unittest.TestCase):
         self.assertIn("Dev tools", labels)
         self.assertIn("Ресурсы", labels)
 
+    def test_static_keyboard_avoids_reusing_same_url(self) -> None:
+        keyboard = digest_static_keyboard(
+            {
+                "sections": {
+                    "models": {
+                        "links": [
+                            "https://site-a.example.com/model",
+                            "https://site-b.example.com/model-2",
+                        ]
+                    },
+                    "dev_tools": {
+                        "links": [
+                            "https://site-a.example.com/model",
+                            "https://site-c.example.com/dev",
+                        ]
+                    },
+                    "coding": {
+                        "links": [
+                            "https://site-a.example.com/model",
+                            "https://site-d.example.com/coding",
+                        ]
+                    },
+                }
+            }
+        )
+        self.assertIsNotNone(keyboard)
+        urls = [button.url for row in keyboard.inline_keyboard for button in row]
+        self.assertEqual(len(urls), len(set(urls)))
+
 
 if __name__ == "__main__":
     unittest.main()

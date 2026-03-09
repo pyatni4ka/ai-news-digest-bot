@@ -690,11 +690,22 @@ def gather_images(items: list[NewsItem], limit: int) -> list[str]:
     images: list[str] = []
     for item in items:
         for image in item.images:
+            if not _is_usable_image(image):
+                continue
             if image not in images:
                 images.append(image)
             if len(images) >= limit:
                 return images
     return images
+
+
+def _is_usable_image(value: str) -> bool:
+    candidate = value.strip().lower()
+    if not candidate or candidate.startswith("data:"):
+        return False
+    if ".svg" in candidate or "placeholder" in candidate:
+        return False
+    return True
 
 
 def serialize_news_items(items: list[NewsItem]) -> list[dict[str, Any]]:

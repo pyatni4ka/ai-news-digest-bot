@@ -3,10 +3,97 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from digest_bot.models import Digest, DigestButton, DigestSection, NewsItem
+
+
+WATCHLIST_NAMES = (
+    "Claude Code",
+    "OpenHands",
+    "Together AI",
+    "ChatGPT",
+    "Anthropic",
+    "OpenAI",
+    "Google",
+    "Gemini",
+    "DeepMind",
+    "Cursor",
+    "Windsurf",
+    "Copilot",
+    "GitHub",
+    "Codex",
+    "Claude",
+    "Grok",
+    "xAI",
+    "Meta",
+    "Llama",
+    "Qwen",
+    "Mistral",
+    "DeepSeek",
+    "Aider",
+    "Replit",
+    "Mozilla",
+    "Alibaba",
+)
+
+MODEL_PATTERNS = (
+    r"Claude(?:\s+(?:Sonnet|Opus|Haiku))?\s+[A-Za-z0-9.\-]+",
+    r"GPT[-\s]?[A-Za-z0-9.\-]+",
+    r"Gemini\s+[A-Za-z0-9.\-]+",
+    r"Grok\s+[A-Za-z0-9.\-]+",
+    r"Llama\s*[A-Za-z0-9.\-]+",
+    r"Qwen\s*[A-Za-z0-9.\-]+",
+    r"DeepSeek\s*[A-Za-z0-9.\-]+",
+    r"Mistral\s*[A-Za-z0-9.\-]+",
+    r"Codex(?:\s+[A-Za-z0-9.\-]+)?",
+    r"Claude Code(?:\s+[A-Za-z0-9.\-]+)?",
+)
+
+OBJECT_REPLACEMENTS = (
+    ("background coding agent", "background coding agent"),
+    ("coding agent", "coding agent"),
+    ("agentic ide", "agentic IDE"),
+    ("ide agents", "IDE-агентов"),
+    ("ide agent", "IDE-агента"),
+    ("repo agent", "repo agent"),
+    ("developer app", "developer app"),
+    ("desktop app", "desktop app"),
+    ("free plan", "бесплатный plan"),
+    ("free tier", "free tier"),
+    ("computer use", "computer use"),
+    ("security", "security"),
+    ("benchmark", "benchmark"),
+    ("benchmarks", "benchmarks"),
+    ("open source", "open-source"),
+)
+
+FEATURE_GROUPS = (
+    (("coding", "code", "refactor", "debug"), "coding и работу с кодом"),
+    (("agent", "agents", "agentic"), "agents"),
+    (("repo", "repository", "repositories"), "работу по repo"),
+    (("terminal",), "terminal"),
+    (("ide", "editor", "vscode"), "IDE"),
+    (("benchmark", "leaderboard", "swe-bench", "arena", "eval"), "benchmarks"),
+    (("long context", "context window"), "long context"),
+    (("computer use",), "computer use"),
+    (("security", "zero-day", "vulnerability"), "security"),
+    (("open source", "open-source"), "open-source"),
+    (("free plan", "free tier", "free forever", "free access", "no cost", "бесплатно"), "бесплатный доступ"),
+    (("tool use",), "tool use"),
+    (("api", "sdk"), "API"),
+)
+
+GENERIC_SUBJECTS = {
+    "new",
+    "major",
+    "latest",
+    "introducing",
+    "announcing",
+    "breaking",
+}
 
 
 def compute_window(slot: str, now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -243,12 +330,12 @@ def build_story_cards(
 
 def _story_card(item: NewsItem, limit: int = 200) -> str:
     title = _display_title(item)
-    fragment = _compact_fragment(item.summary or item.body or item.title, limit=limit)
+    fragment = _localized_fragment(item, limit=limit)
     return f"{_emoji_for_item(item)} {title}: {fragment}"
 
 
 def _display_title(item: NewsItem) -> str:
-    title = " ".join(item.title.split())
+    title = _localized_title(item)
     if len(title) > 78:
         title = title[:75].rstrip() + "..."
     if _is_totally_free(item):
@@ -292,7 +379,7 @@ def _minor_block(items: list[NewsItem]) -> str:
     parts = []
     for item in items:
         title = _display_title(item)
-        fragment = _compact_fragment(item.summary or item.body or item.title, limit=90)
+        fragment = _localized_fragment(item, limit=90)
         parts.append(f"{title} — {fragment}")
     return "🗞 Короткой строкой: " + " | ".join(parts)
 
@@ -310,13 +397,82 @@ def _dev_tools_block(items: list[NewsItem]) -> str:
     parts = []
     for item in items:
         title = _display_title(item)
-        fragment = _compact_fragment(item.summary or item.body or item.title, limit=110)
+        fragment = _localized_fragment(item, limit=110)
         parts.append(f"{title} — {fragment}")
     return "🧑‍💻 Dev tools: " + " | ".join(parts)
 
 
 def _filter_relevant_items(items: list[NewsItem]) -> list[NewsItem]:
     return [item for item in items if "noise" not in set(item.categories)]
+
+
+def _localized_title(item: NewsItem) -> str:
+    title = " ".join(item.title.split())
+    if _contains_cyrillic(title):
+        return title
+
+    subject = _extract_subject(item)
+    verb = _select_verb(item)
+    obj = _extract_object(item, subject)
+    categories = set(item.categories)
+
+    if subject and obj:
+        return f"{subject} {verb} {obj}"
+    if subject and {"models", "release"} & categories:
+        return f"{subject} {verb} новую модель"
+    if subject and "comparisons" in categories:
+        return f"{subject} показала новое сравнение моделей"
+    if subject and {"dev_tools", "vibe_coding", "coding"} & categories:
+        return f"{subject} {verb} обновление для разработки"
+    if "comparisons" in categories:
+        return "Вышло новое сравнение AI-моделей"
+    if {"models", "release"} & categories:
+        return "Вышел новый релиз AI-модели"
+    if {"dev_tools", "vibe_coding", "coding"} & categories:
+        return "Вышел новый апдейт для разработки"
+    if "resources" in categories:
+        return "Появился новый AI-инструмент"
+    return title
+
+
+def _localized_fragment(item: NewsItem, limit: int) -> str:
+    source = item.summary or item.body or item.title
+    if _contains_cyrillic(source):
+        return _compact_fragment(source, limit=limit)
+
+    categories = set(item.categories)
+    features = _extract_features(item)
+    details: list[str] = []
+    if {"models", "release"} & categories:
+        if features:
+            details.append(f"Релиз сфокусирован на {_join_features(features)}.")
+        else:
+            details.append("Это заметный апдейт в линейке AI-моделей.")
+    elif "comparisons" in categories:
+        if features:
+            details.append(f"Сравнение смотрит на {_join_features(features)}.")
+        else:
+            details.append("Материал сравнивает актуальные AI-модели и их позиции.")
+    elif {"dev_tools", "vibe_coding", "coding"} & categories:
+        if features:
+            details.append(f"Апдейт затрагивает {_join_features(features)}.")
+        else:
+            details.append("Новость важна для IDE, AI-агентов и повседневной разработки.")
+    elif "resources" in categories:
+        if features:
+            details.append(f"Инструмент делает упор на {_join_features(features)}.")
+        else:
+            details.append("Речь идет о новом AI-инструменте или приложении.")
+    else:
+        details.append("Источник сообщает о заметном AI-апдейте и его практической пользе.")
+
+    if _is_totally_free(item):
+        details.append("Доступ открыт бесплатно.")
+    elif _looks_open_source(item):
+        details.append("Проект вышел в open-source.")
+
+    text = " ".join(details)
+    return _compact_fragment(text, limit=limit)
 
 
 def _is_model_release(item: NewsItem) -> bool:
@@ -371,6 +527,133 @@ def _is_totally_free(item: NewsItem) -> bool:
         "free",
     )
     return any(cue in haystack for cue in free_cues)
+
+
+def _looks_open_source(item: NewsItem) -> bool:
+    haystack = f"{item.title} {item.summary} {item.body} {' '.join(item.tags)}".lower()
+    return "open source" in haystack or "open-source" in haystack or "исходник" in haystack
+
+
+def _contains_cyrillic(value: str) -> bool:
+    return bool(re.search(r"[А-Яа-яЁё]", value))
+
+
+def _extract_subject(item: NewsItem) -> str | None:
+    title = " ".join(item.title.split())
+    combined = f"{title} {item.summary} {item.body}"
+    for name in WATCHLIST_NAMES:
+        if re.search(re.escape(name), combined, flags=re.IGNORECASE):
+            return name
+    match = re.match(r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){0,2})", title)
+    if match:
+        subject = match.group(1)
+        if subject.lower() not in GENERIC_SUBJECTS:
+            return subject
+    return None
+
+
+def _select_verb(item: NewsItem) -> str:
+    haystack = f"{item.title} {item.summary} {item.body}".lower()
+    categories = set(item.categories)
+    if "открыла исходники" in haystack or "open source" in haystack or "open-source" in haystack:
+        return "открыла исходный код"
+    if "free plan" in haystack or "free tier" in haystack or "free access" in haystack:
+        return "открыла"
+    if {"models", "release"} & categories and any(
+        token in haystack
+        for token in ("released", "release", "ships", "ship", "launch", "launched", "available")
+    ):
+        return "выпустила"
+    if {"models", "release"} & categories and any(
+        token in haystack for token in ("introducing", "announce", "announcing")
+    ):
+        return "представила"
+    if any(token in haystack for token in ("updated", "update", "upgraded", "upgrade", "refresh")):
+        return "обновила"
+    if any(token in haystack for token in ("acquires", "acquired", "acquisition", "buy")):
+        return "купила"
+    if any(token in haystack for token in ("partner", "partnership")):
+        return "запустила партнерство"
+    if any(token in haystack for token in ("introducing", "announce", "announcing")):
+        return "представила"
+    if any(token in haystack for token in ("launch", "launched", "available")):
+        return "запустила"
+    if any(token in haystack for token in ("released", "release", "ships", "ship")):
+        return "выпустила"
+    if any(token in haystack for token in ("open", "opened")):
+        return "открыла"
+    return "обновила"
+
+
+def _extract_object(item: NewsItem, subject: str | None) -> str | None:
+    combined = " ".join(part for part in (item.title, item.summary, item.body) if part)
+    for pattern in MODEL_PATTERNS:
+        match = re.search(pattern, combined, flags=re.IGNORECASE)
+        if match:
+            found = " ".join(match.group(0).split())
+            if not subject or found.lower() != subject.lower():
+                return found
+
+    title_tail = " ".join(item.title.split())
+    if subject and title_tail.lower().startswith(subject.lower()):
+        title_tail = title_tail[len(subject):].strip(" :-—")
+    title_tail = re.sub(
+        r"^(launch(?:es|ed)?|release(?:d|s)?|ships?|updates?|updated|upgrade[sd]?|introducing|announc(?:e|es|ed|ing)|opens?|opened|adds?|added|rolls out|partners? with|acquires?|acquired)\b",
+        "",
+        title_tail,
+        flags=re.IGNORECASE,
+    ).strip(" :-—")
+    translated_tail = _translate_object_phrase(title_tail)
+    if translated_tail:
+        return translated_tail
+
+    categories = set(item.categories)
+    if {"models", "release"} & categories:
+        return "новую модель"
+    if "comparisons" in categories:
+        return "сравнение моделей"
+    if {"dev_tools", "vibe_coding"} & categories:
+        return "новый dev tool"
+    if "coding" in categories:
+        return "апдейт для coding"
+    if "resources" in categories:
+        return "новый AI-инструмент"
+    return None
+
+
+def _translate_object_phrase(value: str) -> str | None:
+    cleaned = " ".join(value.split())
+    if not cleaned:
+        return None
+    for source, target in OBJECT_REPLACEMENTS:
+        if source in cleaned.lower():
+            return target
+    if "model" in cleaned.lower():
+        return re.sub(r"\bmodel\b", "модель", cleaned, flags=re.IGNORECASE)
+    if len(cleaned.split()) <= 4 and cleaned.isascii():
+        return cleaned
+    return None
+
+
+def _extract_features(item: NewsItem) -> list[str]:
+    haystack = f"{item.title} {item.summary} {item.body} {' '.join(item.tags)}".lower()
+    features: list[str] = []
+    for keywords, label in FEATURE_GROUPS:
+        if any(keyword in haystack for keyword in keywords) and label not in features:
+            features.append(label)
+        if len(features) >= 3:
+            break
+    return features
+
+
+def _join_features(features: list[str]) -> str:
+    if not features:
+        return "ключевые AI-сценарии"
+    if len(features) == 1:
+        return features[0]
+    if len(features) == 2:
+        return f"{features[0]} и {features[1]}"
+    return f"{', '.join(features[:-1])} и {features[-1]}"
 
 
 def _emoji_for_item(item: NewsItem) -> str:

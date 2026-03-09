@@ -69,7 +69,7 @@ class PipelineTestCase(unittest.TestCase):
         paragraphs = fallback_digest_paragraphs("monthly", sections)
         self.assertTrue(paragraphs[0].startswith("🚀"))
         self.assertIn(":", paragraphs[0])
-        self.assertIn("NEW CODING MODEL", paragraphs[0])
+        self.assertIn("РЕЛИЗ AI-МОДЕЛИ", paragraphs[0])
         self.assertTrue(any(paragraph.startswith("🗞 Короткой строкой:") for paragraph in paragraphs))
 
     def test_free_items_are_marked(self) -> None:
@@ -224,8 +224,30 @@ class PipelineTestCase(unittest.TestCase):
         cards = build_story_cards("manual", sections, 6)
         dev_block = next((card for card in cards if card.startswith("🧑‍💻 Dev tools:")), "")
         self.assertTrue(dev_block)
-        self.assertIn("Cursor launches background coding agent", dev_block)
-        self.assertIn("Windsurf updates its IDE agents", dev_block)
+        self.assertIn("Cursor запустила background coding agent", dev_block)
+        self.assertIn("Windsurf обновила IDE-агентов", dev_block)
+
+    def test_english_items_are_localized_to_russian_in_fallback(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:model",
+                external_id="ru-1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="Major model update for coding, long context and agents.",
+                body="Anthropic released Claude Sonnet 4.6 with better coding, long context and agent planning.",
+                url="https://example.com/ru-1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding", "watchlist"],
+                importance=12.0,
+            ),
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("выпустила", cards[0].lower())
+        self.assertIn("Релиз сфокусирован", cards[0])
 
 
 if __name__ == "__main__":

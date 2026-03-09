@@ -10,7 +10,10 @@ class BotKeyboardTestCase(unittest.TestCase):
         keyboard = main_menu_keyboard()
         labels = [button.text for row in keyboard.keyboard for button in row]
         self.assertIn("Дайджест сейчас", labels)
+        self.assertIn("За сегодня", labels)
         self.assertIn("Модели", labels)
+        self.assertIn("Watchlist", labels)
+        self.assertIn("Бесплатно", labels)
         self.assertIn("Dev tools", labels)
         self.assertIn("Vibe coding", labels)
 
@@ -18,7 +21,10 @@ class BotKeyboardTestCase(unittest.TestCase):
         keyboard = digest_inline_keyboard(42, {"sections": {}, "summary_payload": {}})
         labels = [button.text for row in keyboard.inline_keyboard for button in row]
         self.assertIn("Дайджест сейчас", labels)
+        self.assertIn("За сегодня", labels)
         self.assertIn("Модели", labels)
+        self.assertIn("Watchlist", labels)
+        self.assertIn("Бесплатно", labels)
         self.assertIn("Dev tools", labels)
         self.assertIn("Ресурсы", labels)
 
@@ -27,16 +33,26 @@ class BotKeyboardTestCase(unittest.TestCase):
             {
                 "sections": {
                     "models": {"links": ["https://example.com/model"]},
+                    "watchlist": {"links": ["https://example.com/watch"]},
                     "dev_tools": {"links": ["https://example.com/dev"]},
+                    "freebies": {"links": ["https://example.com/free"]},
                     "resources": {"links": ["https://example.com/resource"]},
-                }
+                },
             }
         )
         self.assertIsNotNone(keyboard)
         labels = [button.text for row in keyboard.inline_keyboard for button in row]
         self.assertIn("Модели", labels)
+        self.assertIn("Watchlist", labels)
         self.assertIn("Dev tools", labels)
+        self.assertIn("Бесплатно", labels)
         self.assertIn("Ресурсы", labels)
+
+    def test_static_keyboard_supports_manual_digest_url(self) -> None:
+        keyboard = digest_static_keyboard({"sections": {}}, "https://github.com/example/actions/workflows/x.yml")
+        self.assertIsNotNone(keyboard)
+        labels = [button.text for row in keyboard.inline_keyboard for button in row]
+        self.assertIn("Дайджест сейчас", labels)
 
     def test_static_keyboard_avoids_reusing_same_url(self) -> None:
         keyboard = digest_static_keyboard(

@@ -122,6 +122,9 @@ def compute_window_with_hours(
     elif slot == "monthly":
         end_local = local_now
         start_local = end_local - timedelta(days=30)
+    elif slot == "today":
+        end_local = local_now
+        start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         end_local = local_now
         start_local = end_local - timedelta(hours=12)
@@ -216,6 +219,8 @@ def select_sections(items: list[NewsItem], slot: str = "manual") -> dict[str, li
         "coding": 8 if slot == "monthly" else 5,
         "vibe_coding": 8 if slot == "monthly" else 5,
         "dev_tools": 8 if slot == "monthly" else 5,
+        "watchlist": 8 if slot == "monthly" else 5,
+        "freebies": 6 if slot == "monthly" else 4,
         "resources": 6 if slot == "monthly" else 5,
     }
     return {
@@ -225,6 +230,11 @@ def select_sections(items: list[NewsItem], slot: str = "manual") -> dict[str, li
         "coding": unique_first(categorized["coding"], limits["coding"]),
         "vibe_coding": unique_first(categorized["vibe_coding"], limits["vibe_coding"]),
         "dev_tools": unique_first(categorized["dev_tools"], limits["dev_tools"]),
+        "watchlist": unique_first(categorized["watchlist"], limits["watchlist"]),
+        "freebies": unique_first(
+            [item for item in relevant_items if _is_totally_free(item)],
+            limits["freebies"],
+        ),
         "resources": unique_first(categorized["resources"], limits["resources"]),
     }
 
@@ -248,7 +258,13 @@ def fallback_digest_paragraphs(slot: str, sections: dict[str, list[NewsItem]]) -
     paragraphs = build_story_cards(slot, sections, limit)
     if paragraphs:
         return paragraphs
-    label = "последний месяц" if slot == "monthly" else "текущее окно"
+    label = (
+        "последний месяц"
+        if slot == "monthly"
+        else "сегодня"
+        if slot == "today"
+        else "текущее окно"
+    )
     return [f"📭 За {label} почти не было релевантных AI-новостей."]
 
 
@@ -267,6 +283,8 @@ def build_title(slot: str, start_at: datetime, end_at: datetime, timezone_name: 
         if slot == "evening"
         else "Месячный"
         if slot == "monthly"
+        else "За сегодня"
+        if slot == "today"
         else "Оперативный"
     )
     return f"{label} AI digest • {local_end:%d.%m %H:%M}"
@@ -280,6 +298,8 @@ def title_for_section(key: str) -> str:
         "coding": "Coding",
         "dev_tools": "Dev tools",
         "vibe_coding": "Vibe coding",
+        "watchlist": "Watchlist",
+        "freebies": "Бесплатно",
         "resources": "Ресурсы",
     }.get(key, key)
 

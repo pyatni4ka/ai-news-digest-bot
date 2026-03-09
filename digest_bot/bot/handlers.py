@@ -30,6 +30,16 @@ def build_router(service: DigestService) -> Router:
         digest_id = await service.refresh_and_build_current_digest()
         await service.send_digest(digest_id)
 
+    @router.message(Command("digest_today"))
+    @router.message(F.text == "За сегодня")
+    async def digest_today_handler(message: Message) -> None:
+        if not service.is_admin_chat(message.chat.id):
+            return
+        await message.answer("Собираю дайджест за сегодня.")
+        await service.sync_sources(lookback_hours=30)
+        digest_id = await service.build_digest("today")
+        await service.send_digest(digest_id)
+
     @router.message(Command("digest_month"))
     @router.message(F.text == "За месяц")
     async def digest_month_handler(message: Message) -> None:
@@ -139,8 +149,13 @@ def build_router(service: DigestService) -> Router:
                 updated = service.suppress_noise_for_digest(digest_id)
                 await callback.answer(f"Фильтр шума усилен ({updated})")
             case "refresh":
+                slot = action[2] if len(action) > 2 else "now"
                 await callback.answer("Обновляю")
-                digest_id = await service.refresh_and_build_current_digest()
+                if slot == "today":
+                    await service.sync_sources(lookback_hours=30)
+                    digest_id = await service.build_digest("today")
+                else:
+                    digest_id = await service.refresh_and_build_current_digest()
                 await service.send_digest(digest_id)
             case _:
                 await callback.answer()

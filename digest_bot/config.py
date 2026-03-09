@@ -19,6 +19,7 @@ class Settings:
     tg_session_name: str
     tg_session_string: str | None
     interactive_bot: bool
+    manual_digest_url: str | None
     timezone: str
     morning_hour: int
     evening_hour: int
@@ -64,6 +65,7 @@ def load_settings() -> Settings:
         tg_session_name=os.getenv("TG_SESSION_NAME", "ai_news_digest"),
         tg_session_string=os.getenv("TG_SESSION_STRING"),
         interactive_bot=_get_bool("INTERACTIVE_BOT", default=True),
+        manual_digest_url=os.getenv("MANUAL_DIGEST_URL"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
         morning_hour=int(os.getenv("MORNING_HOUR", "9")),
         evening_hour=int(os.getenv("EVENING_HOUR", "19")),

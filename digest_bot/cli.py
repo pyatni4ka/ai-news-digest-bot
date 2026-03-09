@@ -72,6 +72,8 @@ async def _run_slot(slot: str) -> None:
     try:
         if slot == "monthly":
             await service.sync_sources(lookback_hours=24 * 31)
+        elif slot == "today":
+            await service.sync_sources(lookback_hours=30)
         elif slot == "morning":
             await service.sync_sources(lookback_hours=16)
         elif slot == "evening":
@@ -102,14 +104,14 @@ def main() -> None:
     )
     run_parser.add_argument(
         "--slot",
-        choices=["morning", "evening", "manual", "monthly"],
+        choices=["morning", "evening", "manual", "monthly", "today"],
         default="manual",
     )
 
     digest_parser = subparsers.add_parser("digest", help="Build a digest from stored items")
     digest_parser.add_argument(
         "--slot",
-        choices=["morning", "evening", "manual", "monthly"],
+        choices=["morning", "evening", "manual", "monthly", "today"],
         default="manual",
     )
     digest_parser.add_argument("--send", action="store_true")

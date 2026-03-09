@@ -15,13 +15,18 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [
                 KeyboardButton(text="Дайджест сейчас"),
+                KeyboardButton(text="За сегодня"),
                 KeyboardButton(text="Главное"),
-                KeyboardButton(text="Модели"),
             ],
             [
+                KeyboardButton(text="Модели"),
                 KeyboardButton(text="Coding"),
+                KeyboardButton(text="Watchlist"),
+            ],
+            [
                 KeyboardButton(text="Dev tools"),
                 KeyboardButton(text="Vibe coding"),
+                KeyboardButton(text="Бесплатно"),
             ],
             [
                 KeyboardButton(text="Сравнения"),
@@ -44,8 +49,12 @@ def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarku
             InlineKeyboardButton(text="Дайджест сейчас", callback_data="dg:refresh:now"),
         ],
         [
+            InlineKeyboardButton(text="За сегодня", callback_data="dg:refresh:today"),
             InlineKeyboardButton(text="Модели", callback_data=f"dg:sec:{digest_id}:models"),
+        ],
+        [
             InlineKeyboardButton(text="Coding", callback_data=f"dg:sec:{digest_id}:coding"),
+            InlineKeyboardButton(text="Watchlist", callback_data=f"dg:sec:{digest_id}:watchlist"),
         ],
         [
             InlineKeyboardButton(
@@ -59,6 +68,9 @@ def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarku
         ],
         [
             InlineKeyboardButton(text="Сравнения", callback_data=f"dg:sec:{digest_id}:comparisons"),
+            InlineKeyboardButton(text="Бесплатно", callback_data=f"dg:sec:{digest_id}:freebies"),
+        ],
+        [
             InlineKeyboardButton(text="Ресурсы", callback_data=f"dg:sec:{digest_id}:resources"),
         ],
         [
@@ -69,14 +81,17 @@ def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def digest_static_keyboard(payload: dict) -> InlineKeyboardMarkup | None:
+def digest_static_keyboard(payload: dict, manual_digest_url: str | None = None) -> InlineKeyboardMarkup | None:
     sections = payload.get("sections", {})
     section_specs = [
+        ("Дайджест сейчас", manual_digest_url),
         ("Модели", sections.get("models", {}).get("links", [])),
+        ("Watchlist", sections.get("watchlist", {}).get("links", [])),
         ("Dev tools", sections.get("dev_tools", {}).get("links", [])),
         ("Coding", sections.get("coding", {}).get("links", [])),
         ("Vibe coding", sections.get("vibe_coding", {}).get("links", [])),
         ("Сравнения", sections.get("comparisons", {}).get("links", [])),
+        ("Бесплатно", sections.get("freebies", {}).get("links", [])),
         ("Ресурсы", sections.get("resources", {}).get("links", [])),
     ]
     rows: list[list[InlineKeyboardButton]] = []
@@ -110,7 +125,15 @@ def links_keyboard(urls: list[str], prefix: str) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _pick_topic_link(links: list[str], used_urls: set[str], used_domains: set[str]) -> str | None:
+def _pick_topic_link(
+    links: list[str] | str | None,
+    used_urls: set[str],
+    used_domains: set[str],
+) -> str | None:
+    if isinstance(links, str):
+        links = [links]
+    if not links:
+        return None
     for url in links:
         if url and url not in used_urls and urlparse(url).netloc not in used_domains:
             return url

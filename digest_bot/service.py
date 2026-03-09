@@ -135,7 +135,7 @@ class DigestService:
         reply_markup = (
             digest_inline_keyboard(int(row["id"]), payload)
             if self.settings.interactive_bot
-            else digest_static_keyboard(payload)
+            else digest_static_keyboard(payload, self.settings.manual_digest_url)
         )
         await self.bot.send_message(
             chat_id=self.settings.admin_chat_id,
@@ -255,6 +255,7 @@ class DigestService:
             f"LLM backend: {self.settings.llm_backend}\n"
             f"LLM model: {self._active_model_label()}\n"
             f"Макс. изображений: {self.settings.max_images_per_digest}\n"
+            f"Manual digest URL: {self.settings.manual_digest_url or '-'}\n"
             f"База: {self.settings.db_path}"
         )
 

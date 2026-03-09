@@ -6,13 +6,24 @@ import unittest
 from digest_bot.models import NewsItem
 from digest_bot.pipeline.classify import classify_items
 from digest_bot.pipeline.dedup import deduplicate, normalize_url
-from digest_bot.pipeline.digest_builder import build_story_cards, fallback_digest_paragraphs, select_sections
+from digest_bot.pipeline.digest_builder import (
+    build_story_cards,
+    compute_window_with_hours,
+    fallback_digest_paragraphs,
+    select_sections,
+)
 
 
 class PipelineTestCase(unittest.TestCase):
     def test_normalize_url_strips_tracking(self) -> None:
         url = "https://example.com/post?utm_source=telegram&id=42#fragment"
         self.assertEqual(normalize_url(url), "https://example.com/post?id=42")
+
+    def test_today_window_starts_at_local_midnight(self) -> None:
+        now = datetime(2026, 3, 10, 12, 15, tzinfo=UTC)
+        start_at, end_at = compute_window_with_hours("today", now, "Europe/Moscow", 9, 19)
+        self.assertEqual(start_at.isoformat(), "2026-03-09T21:00:00+00:00")
+        self.assertEqual(end_at.isoformat(), "2026-03-10T12:15:00+00:00")
 
     def test_classify_and_deduplicate(self) -> None:
         now = datetime.now(UTC)
@@ -104,6 +115,7 @@ class PipelineTestCase(unittest.TestCase):
         cards = build_story_cards("manual", sections, 6)
         self.assertTrue(any("АБСОЛЮТНО БЕСПЛАТНО" in card for card in cards))
         self.assertTrue(any("CLAUDE SONNET 4.6" in card for card in cards))
+        self.assertEqual(len(sections["freebies"]), 1)
 
     def test_noise_items_are_filtered_from_sections(self) -> None:
         now = datetime.now(UTC)
@@ -167,6 +179,8 @@ class PipelineTestCase(unittest.TestCase):
         classify_items(items)
         self.assertIn("watchlist", items[0].categories)
         self.assertGreater(items[0].importance, items[1].importance)
+        sections = select_sections(items, slot="manual")
+        self.assertEqual(sections["watchlist"][0].title, "OpenAI launches Codex coding agent")
 
     def test_dev_tools_block_is_rendered(self) -> None:
         now = datetime.now(UTC)

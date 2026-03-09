@@ -13,6 +13,7 @@ on:
         type: choice
         options:
           - manual
+          - today
           - morning
           - evening
           - monthly
@@ -43,6 +44,7 @@ jobs:
       DB_PATH: data/digest.db
       MEDIA_DIR: data/media
       PYTHONUTF8: "1"
+      MANUAL_DIGEST_URL: ${{ format('https://github.com/{0}/actions/workflows/ai-digest.yml', github.repository) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

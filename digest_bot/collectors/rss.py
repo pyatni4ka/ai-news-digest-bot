@@ -41,7 +41,9 @@ class RSSCollector(Collector):
         now = datetime.now(UTC)
         items: list[NewsItem] = []
         for entry in feed.entries[: source.config.get("max_items", 100)]:
-            published_at = _parse_feed_datetime(entry, now)
+            published_at = _parse_feed_datetime(entry)
+            if published_at is None:
+                continue
             if published_at < since:
                 continue
 
@@ -79,7 +81,7 @@ class RSSCollector(Collector):
         return items
 
 
-def _parse_feed_datetime(entry: dict, fallback: datetime) -> datetime:
+def _parse_feed_datetime(entry: dict) -> datetime | None:
     if entry.get("published_parsed"):
         return datetime(*entry.published_parsed[:6], tzinfo=UTC)
     if entry.get("updated_parsed"):
@@ -93,7 +95,7 @@ def _parse_feed_datetime(entry: dict, fallback: datetime) -> datetime:
                 return value.astimezone(UTC)
             except (TypeError, ValueError):
                 continue
-    return fallback
+    return None
 
 
 def _extract_images(summary_html: str, entry: dict) -> list[str]:

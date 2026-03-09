@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Iterable
+import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -38,7 +39,7 @@ class WebpageCollector(Collector):
         ) as client:
             response = await client.get(listing_url)
             response.raise_for_status()
-            candidate_urls = _extract_article_urls(
+            candidate_articles = _extract_article_candidates(
                 html=response.text,
                 listing_url=listing_url,
                 include_patterns=include_patterns,
@@ -46,29 +47,30 @@ class WebpageCollector(Collector):
                 limit=max_items,
             )
             items: list[NewsItem] = []
-            for article_url in candidate_urls:
+            for article_url, listing_published_at in candidate_articles:
                 try:
                     article = await client.get(article_url)
                     article.raise_for_status()
                 except httpx.HTTPError:
                     continue
-                item = _parse_article(source, article_url, article.text)
+                item = _parse_article(source, article_url, article.text, listing_published_at)
                 if item is None or item.published_at < since:
                     continue
                 items.append(item)
         return items
 
 
-def _extract_article_urls(
+def _extract_article_candidates(
     html: str,
     listing_url: str,
     include_patterns: Iterable[str],
     exclude_patterns: Iterable[str],
     limit: int,
-) -> list[str]:
+) -> list[tuple[str, datetime | None]]:
     soup = BeautifulSoup(html, "html.parser")
     domain = urlparse(listing_url).netloc
-    urls: list[str] = []
+    candidates: list[tuple[str, datetime | None]] = []
+    seen: set[str] = set()
     for anchor in soup.find_all("a", href=True):
         absolute = urljoin(listing_url, anchor["href"])
         if urlparse(absolute).netloc != domain:
@@ -77,14 +79,21 @@ def _extract_article_urls(
             continue
         if exclude_patterns and any(pattern in absolute for pattern in exclude_patterns):
             continue
-        if absolute not in urls:
-            urls.append(absolute)
-        if len(urls) >= limit:
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        candidates.append((absolute, _extract_listing_datetime(anchor)))
+        if len(candidates) >= limit:
             break
-    return urls
+    return candidates
 
 
-def _parse_article(source: Source, article_url: str, html: str) -> NewsItem | None:
+def _parse_article(
+    source: Source,
+    article_url: str,
+    html: str,
+    listing_published_at: datetime | None = None,
+) -> NewsItem | None:
     soup = BeautifulSoup(html, "html.parser")
     title = (
         _meta_content(soup, "meta[property='og:title']")
@@ -97,9 +106,14 @@ def _parse_article(source: Source, article_url: str, html: str) -> NewsItem | No
     published_at = _parse_datetime(
         _meta_content(soup, "meta[property='article:published_time']")
         or _meta_content(soup, "meta[name='article:published_time']")
+        or _meta_content(soup, "meta[name='publish-date']")
+        or _meta_content(soup, "meta[name='date']")
         or _tag_attr(soup, "time", "datetime")
+        or _extract_jsonld_datetime(soup)
     )
-    published_at = published_at or datetime.now(UTC)
+    published_at = published_at or listing_published_at
+    if published_at is None:
+        return None
 
     body_text = _extract_body_text(soup)
     summary = body_text[:700]
@@ -155,6 +169,56 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _extract_jsonld_datetime(soup: BeautifulSoup) -> str | None:
+    for script in soup.select("script[type='application/ld+json']"):
+        content = script.string or script.get_text(" ", strip=True)
+        if not content:
+            continue
+        match = re.search(r'"datePublished"\s*:\s*"([^"]+)"', content)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _extract_listing_datetime(anchor) -> datetime | None:
+    current = anchor
+    for _ in range(4):
+        if current is None:
+            break
+        text = current.get_text(" ", strip=True)
+        parsed = _parse_human_datetime(text)
+        if parsed is not None:
+            return parsed
+        current = current.parent
+    return None
+
+
+def _parse_human_datetime(value: str) -> datetime | None:
+    iso_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", value)
+    if iso_match:
+        return _parse_datetime(iso_match.group(1))
+
+    month_match = re.search(
+        r"\b("
+        r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+        r"Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+        r")\s+(\d{1,2}),\s*(20\d{2})\b",
+        value,
+        re.IGNORECASE,
+    )
+    if month_match:
+        normalized = f"{month_match.group(1)} {month_match.group(2)} {month_match.group(3)}"
+        try:
+            parsed = datetime.strptime(normalized, "%b %d %Y")
+        except ValueError:
+            try:
+                parsed = datetime.strptime(normalized, "%B %d %Y")
+            except ValueError:
+                return None
+        return parsed.replace(tzinfo=UTC)
+    return None
 
 
 def _extract_body_text(soup: BeautifulSoup) -> str:

@@ -342,7 +342,15 @@ class DigestService:
         return "\n\n".join(chunks)[:4000]
 
     def _split_label(self, paragraph: str) -> tuple[str | None, str]:
-        for label in ("Главное", "Модели и релизы", "Сравнения", "Coding", "Vibe coding", "Ресурсы"):
+        for label in (
+            "Главное",
+            "Модели и релизы",
+            "Сравнения",
+            "Coding",
+            "Dev tools",
+            "Vibe coding",
+            "Ресурсы",
+        ):
             prefix = f"{label}:"
             if paragraph.startswith(prefix):
                 return label, paragraph[len(prefix):].strip()

@@ -57,6 +57,12 @@ def build_router(service: DigestService) -> Router:
             return
         await _send_section(message, service, "coding")
 
+    @router.message(F.text == "Dev tools")
+    async def dev_tools_handler(message: Message) -> None:
+        if not service.is_admin_chat(message.chat.id):
+            return
+        await _send_section(message, service, "dev_tools")
+
     @router.message(F.text == "Vibe coding")
     async def vibe_handler(message: Message) -> None:
         if not service.is_admin_chat(message.chat.id):

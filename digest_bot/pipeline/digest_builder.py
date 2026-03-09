@@ -61,6 +61,7 @@ def build_digest(
     sections = select_sections(items, slot=slot)
     resource_links = gather_links(sections["resources"], 5)
     model_links = gather_links(sections["models"], 3)
+    dev_tool_links = gather_links(sections["dev_tools"], 3)
     image_paths = gather_images(items, 10)
     paragraphs = split_paragraphs(summary_text, paragraph_count)
     if not paragraphs:
@@ -81,6 +82,7 @@ def build_digest(
     buttons = [
         DigestButton(text="Подробнее", action="more"),
         DigestButton(text="Только coding", action="section", value="coding"),
+        DigestButton(text="Только dev tools", action="section", value="dev_tools"),
         DigestButton(text="Только vibe coding", action="section", value="vibe_coding"),
         DigestButton(text="Ресурсы", action="links", value="resources"),
         DigestButton(
@@ -104,6 +106,7 @@ def build_digest(
             "section_counts": {key: len(value) for key, value in sections.items()},
             "resource_links": resource_links,
             "model_links": model_links,
+            "dev_tool_links": dev_tool_links,
             "generated_at": now.isoformat(),
         },
         buttons=buttons,
@@ -113,8 +116,9 @@ def build_digest(
 
 
 def select_sections(items: list[NewsItem], slot: str = "manual") -> dict[str, list[NewsItem]]:
+    relevant_items = _filter_relevant_items(items)
     categorized: dict[str, list[NewsItem]] = defaultdict(list)
-    for item in sorted(items, key=lambda row: (row.importance, row.published_at), reverse=True):
+    for item in sorted(relevant_items, key=lambda row: (row.importance, row.published_at), reverse=True):
         categorized["headline"].append(item)
         for category in item.categories:
             categorized[category].append(item)
@@ -124,6 +128,7 @@ def select_sections(items: list[NewsItem], slot: str = "manual") -> dict[str, li
         "comparisons": 6 if slot == "monthly" else 4,
         "coding": 8 if slot == "monthly" else 5,
         "vibe_coding": 8 if slot == "monthly" else 5,
+        "dev_tools": 8 if slot == "monthly" else 5,
         "resources": 6 if slot == "monthly" else 5,
     }
     return {
@@ -132,6 +137,7 @@ def select_sections(items: list[NewsItem], slot: str = "manual") -> dict[str, li
         "comparisons": unique_first(categorized["comparisons"], limits["comparisons"]),
         "coding": unique_first(categorized["coding"], limits["coding"]),
         "vibe_coding": unique_first(categorized["vibe_coding"], limits["vibe_coding"]),
+        "dev_tools": unique_first(categorized["dev_tools"], limits["dev_tools"]),
         "resources": unique_first(categorized["resources"], limits["resources"]),
     }
 
@@ -185,6 +191,7 @@ def title_for_section(key: str) -> str:
         "models": "Модели и релизы",
         "comparisons": "Сравнения",
         "coding": "Coding",
+        "dev_tools": "Dev tools",
         "vibe_coding": "Vibe coding",
         "resources": "Ресурсы",
     }.get(key, key)
@@ -203,7 +210,9 @@ def build_story_cards(
     sections: dict[str, list[NewsItem]],
     limit: int,
 ) -> list[str]:
-    main_limit = max(limit - 1, 1)
+    dev_items = _dev_tool_items(sections, slot)
+    reserved_slots = 1 if dev_items else 0
+    main_limit = max(limit - reserved_slots - 1, 1)
     pool = unique_first(
         sections.get("models", [])
         + sections.get("comparisons", [])
@@ -211,10 +220,22 @@ def build_story_cards(
         + sections.get("vibe_coding", [])
         + sections.get("resources", [])
         + sections.get("headline", []),
-        main_limit,
+        max(limit * 3, 12),
     )
-    paragraphs = [_story_card(item) for item in pool[:main_limit]]
-    minor_items = _minor_items(sections, pool, 4 if slot == "monthly" else 3)
+    dev_keys = {item.dedup_key or item.title for item in dev_items}
+    main_candidates = [item for item in pool if (item.dedup_key or item.title) not in dev_keys]
+    if not main_candidates and dev_items:
+        main_candidates = dev_items[:1]
+        dev_items = dev_items[1:]
+        reserved_slots = 1 if dev_items else 0
+        main_limit = max(limit - reserved_slots - 1, 1)
+    selected_main = main_candidates[:main_limit]
+    minor_items = _minor_items(sections, selected_main + dev_items, 4 if slot == "monthly" else 3)
+    if not minor_items:
+        selected_main = main_candidates[: max(limit - reserved_slots, 1)]
+    paragraphs = [_story_card(item) for item in selected_main]
+    if dev_items:
+        paragraphs.append(_dev_tools_block(dev_items))
     if minor_items:
         paragraphs.append(_minor_block(minor_items))
     return paragraphs[:limit]
@@ -251,6 +272,7 @@ def _minor_items(
     pool = unique_first(
         sections.get("headline", [])
         + sections.get("resources", [])
+        + sections.get("dev_tools", [])
         + sections.get("coding", [])
         + sections.get("vibe_coding", []),
         20,
@@ -273,6 +295,28 @@ def _minor_block(items: list[NewsItem]) -> str:
         fragment = _compact_fragment(item.summary or item.body or item.title, limit=90)
         parts.append(f"{title} — {fragment}")
     return "🗞 Короткой строкой: " + " | ".join(parts)
+
+
+def _dev_tool_items(sections: dict[str, list[NewsItem]], slot: str) -> list[NewsItem]:
+    limit = 4 if slot == "monthly" else 3
+    items = unique_first(
+        sections.get("dev_tools", []) + sections.get("vibe_coding", []),
+        limit,
+    )
+    return items if len(items) >= 2 else []
+
+
+def _dev_tools_block(items: list[NewsItem]) -> str:
+    parts = []
+    for item in items:
+        title = _display_title(item)
+        fragment = _compact_fragment(item.summary or item.body or item.title, limit=110)
+        parts.append(f"{title} — {fragment}")
+    return "🧑‍💻 Dev tools: " + " | ".join(parts)
+
+
+def _filter_relevant_items(items: list[NewsItem]) -> list[NewsItem]:
+    return [item for item in items if "noise" not in set(item.categories)]
 
 
 def _is_model_release(item: NewsItem) -> bool:

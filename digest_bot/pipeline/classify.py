@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from digest_bot.models import NewsItem
 
 
@@ -74,13 +76,109 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
         "plugin",
         "editor",
     ),
+    "dev_tools": (
+        "cursor",
+        "windsurf",
+        "claude code",
+        "copilot",
+        "codex",
+        "aider",
+        "openhands",
+        "continue",
+        "replit",
+        "lovable",
+        "v0",
+        "bolt",
+        "dev tool",
+        "developer tool",
+        "editor",
+        "extension",
+        "plugin",
+        "agentic ide",
+        "coding agent",
+        "ide",
+    ),
+    "watchlist": (
+        "openai",
+        "chatgpt",
+        "anthropic",
+        "claude",
+        "google",
+        "gemini",
+        "deepmind",
+        "xai",
+        "grok",
+        "cursor",
+        "windsurf",
+        "claude code",
+        "copilot",
+        "codex",
+        "github",
+        "replit",
+        "v0",
+        "aider",
+        "openhands",
+    ),
 }
+
+NOISE_PATTERNS = (
+    "prompt",
+    "промпт",
+    "про-совет",
+    "лайфхак",
+    "tips",
+    "tip:",
+    "top prompts",
+    "best prompts",
+    "подборка",
+    "генерируем",
+    "для учебы",
+    "для учёбы",
+    "скидка",
+    "промокод",
+    "ваканс",
+    "курс",
+    "курсы",
+    "9 лучших",
+    "10 лучших",
+    "подборка сервисов",
+    "подборка инструментов",
+    "лучших промптов",
+    "best tools",
+    "top tools",
+)
+
+SIGNAL_PATTERNS = (
+    "release",
+    "released",
+    "launch",
+    "launched",
+    "introducing",
+    "announcing",
+    "announce",
+    "updated",
+    "update",
+    "new version",
+    "preview",
+    "beta",
+    "версия",
+    "обновил",
+    "обновила",
+    "выпустил",
+    "выпустила",
+    "релиз",
+    "запустил",
+    "запустила",
+    "открыла исходники",
+    "open source",
+    "open-source",
+)
 
 
 def classify_items(items: list[NewsItem]) -> list[NewsItem]:
     for item in items:
         categories = set(item.categories)
-        haystack = _normalize(" ".join([item.title, item.summary, item.body, " ".join(item.tags)]))
+        haystack = item_haystack(item)
         for category, keywords in KEYWORDS.items():
             if any(keyword in haystack for keyword in keywords):
                 categories.add(category)
@@ -90,6 +188,8 @@ def classify_items(items: list[NewsItem]) -> list[NewsItem]:
             categories.add("general")
         if "coding" in categories and "vibe_coding" not in categories and "cursor" in haystack:
             categories.add("vibe_coding")
+        if is_noise_item(item, haystack=haystack, categories=categories):
+            categories.add("noise")
         item.categories = sorted(categories)
         item.importance = score_item(item)
     return items
@@ -99,7 +199,7 @@ def score_item(item: NewsItem) -> float:
     score = 0.0
     tags = set(item.tags)
     categories = set(item.categories)
-    haystack = _normalize(" ".join([item.title, item.summary, item.body, " ".join(item.tags)]))
+    haystack = item_haystack(item)
     if "official" in tags:
         score += 3.0
     if "telegram" in tags:
@@ -112,16 +212,66 @@ def score_item(item: NewsItem) -> float:
         score += 2.2
     if "vibe_coding" in categories:
         score += 2.0
+    if "dev_tools" in categories:
+        score += 2.6
+    if "watchlist" in categories:
+        score += 2.0
+    if "watchlist" in categories and {"models", "release", "dev_tools"} & categories:
+        score += 1.3
+    if "official" in tags and "watchlist" in categories:
+        score += 0.8
     if "resources" in categories:
         score += 1.0
-    if any(keyword in haystack for keyword in ("cursor", "windsurf", "claude code", "copilot", "codex", "aider", "openhands", "continue", "replit", "lovable", "v0", "bolt")):
-        score += 1.8
-    if any(keyword in haystack for keyword in ("free", "free tier", "no cost", "open beta", "open-source", "open source")):
+    if is_free_offer_item(item, haystack=haystack):
         score += 1.0
+    if "noise" in categories:
+        score -= 6.5
+    if _looks_like_versioned_release(haystack):
+        score += 1.5
     score += min(len(item.body) / 1200, 2.5)
     score += min(len(item.summary) / 600, 1.5)
     return round(score, 3)
 
 
+def item_haystack(item: NewsItem) -> str:
+    return _normalize(" ".join([item.title, item.summary, item.body, " ".join(item.tags)]))
+
+
+def is_noise_item(
+    item: NewsItem,
+    haystack: str | None = None,
+    categories: set[str] | None = None,
+) -> bool:
+    value = haystack or item_haystack(item)
+    title = _normalize(item.title)
+    item_categories = categories or set(item.categories)
+    has_noise_pattern = any(pattern in value for pattern in NOISE_PATTERNS)
+    if not has_noise_pattern and not _looks_like_listicle(title):
+        return False
+    if "comparisons" in item_categories:
+        return False
+    if "release" in item_categories or "models" in item_categories:
+        return False
+    if any(pattern in value for pattern in SIGNAL_PATTERNS):
+        return False
+    return True
+
+
+def is_free_offer_item(item: NewsItem, haystack: str | None = None) -> bool:
+    value = haystack or item_haystack(item)
+    return any(
+        keyword in value
+        for keyword in ("free", "free tier", "free plan", "free forever", "no cost", "бесплатно")
+    )
+
+
 def _normalize(value: str) -> str:
     return value.lower().replace("-", " ")
+
+
+def _looks_like_versioned_release(haystack: str) -> bool:
+    return bool(re.search(r"\b(v?\d+(\.\d+){1,3}|version \d+(\.\d+)*)\b", haystack))
+
+
+def _looks_like_listicle(title: str) -> bool:
+    return bool(re.search(r"\b\d+\s+(лучш|best|top)\w*\b", title))

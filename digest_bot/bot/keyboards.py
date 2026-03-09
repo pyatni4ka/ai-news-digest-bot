@@ -18,12 +18,15 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="Coding"),
+                KeyboardButton(text="Dev tools"),
                 KeyboardButton(text="Vibe coding"),
-                KeyboardButton(text="Сравнения"),
             ],
             [
+                KeyboardButton(text="Сравнения"),
                 KeyboardButton(text="За месяц"),
                 KeyboardButton(text="Источники"),
+            ],
+            [
                 KeyboardButton(text="Настройки"),
             ],
         ],
@@ -42,9 +45,15 @@ def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarku
         ],
         [
             InlineKeyboardButton(
+                text="Только dev tools",
+                callback_data=f"dg:sec:{digest_id}:dev_tools",
+            ),
+            InlineKeyboardButton(
                 text="Только vibe coding",
                 callback_data=f"dg:sec:{digest_id}:vibe_coding",
             ),
+        ],
+        [
             InlineKeyboardButton(text="Ресурсы", callback_data=f"dg:links:{digest_id}:resources"),
         ],
         [

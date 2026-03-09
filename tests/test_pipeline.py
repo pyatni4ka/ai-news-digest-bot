@@ -105,6 +105,128 @@ class PipelineTestCase(unittest.TestCase):
         self.assertTrue(any("АБСОЛЮТНО БЕСПЛАТНО" in card for card in cards))
         self.assertTrue(any("CLAUDE SONNET 4.6" in card for card in cards))
 
+    def test_noise_items_are_filtered_from_sections(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="tg:noise",
+                external_id="noise-1",
+                title="9 лучших промптов для учебы и работы",
+                summary="Подборка лучших промптов на каждый день.",
+                body="Подборка лучших промптов и лайфхаков для учебы и работы.",
+                url="https://example.com/noise-1",
+                published_at=now,
+                collected_at=now,
+                tags=["telegram"],
+            ),
+            NewsItem(
+                source_key="rss:official",
+                external_id="release-1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="New model release focused on coding and agents.",
+                body="Anthropic released Claude Sonnet 4.6 with better coding, long context and agent planning.",
+                url="https://example.com/release-1",
+                published_at=now,
+                collected_at=now,
+                tags=["official"],
+            ),
+        ]
+        classify_items(items)
+        self.assertIn("noise", items[0].categories)
+        sections = select_sections(items, slot="manual")
+        headline_titles = [item.title for item in sections["headline"]]
+        self.assertIn("Anthropic ships Claude Sonnet 4.6", headline_titles)
+        self.assertNotIn("9 лучших промптов для учебы и работы", headline_titles)
+
+    def test_watchlist_release_scores_higher_than_generic_release(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:watchlist",
+                external_id="watch-1",
+                title="OpenAI launches Codex coding agent",
+                summary="Official release for repo editing and terminal tasks.",
+                body="OpenAI launched Codex coding agent for repository editing and terminal work.",
+                url="https://example.com/watch-1",
+                published_at=now,
+                collected_at=now,
+                tags=["official"],
+            ),
+            NewsItem(
+                source_key="rss:generic",
+                external_id="generic-1",
+                title="Acme launches coding agent",
+                summary="Official release for repo editing and terminal tasks.",
+                body="Acme launched a coding agent for repository editing and terminal work.",
+                url="https://example.com/generic-1",
+                published_at=now,
+                collected_at=now,
+                tags=["official"],
+            ),
+        ]
+        classify_items(items)
+        self.assertIn("watchlist", items[0].categories)
+        self.assertGreater(items[0].importance, items[1].importance)
+
+    def test_dev_tools_block_is_rendered(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:model",
+                external_id="model-1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="Major model update for coding and agents.",
+                body="Anthropic released Claude Sonnet 4.6 with better coding, long context and agent planning.",
+                url="https://example.com/model-1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding"],
+                importance=12.0,
+            ),
+            NewsItem(
+                source_key="rss:dev",
+                external_id="dev-1",
+                title="Cursor launches background coding agent",
+                summary="Cursor added a new repo agent for IDE workflows.",
+                body="Cursor launched a background coding agent for repository tasks in the IDE.",
+                url="https://example.com/dev-1",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "watchlist"],
+                importance=11.0,
+            ),
+            NewsItem(
+                source_key="rss:dev",
+                external_id="dev-2",
+                title="Windsurf updates its IDE agents",
+                summary="Windsurf shipped faster IDE agents for debugging.",
+                body="Windsurf updated its IDE agents with faster debugging and editing loops.",
+                url="https://example.com/dev-2",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "vibe_coding", "watchlist"],
+                importance=10.5,
+            ),
+            NewsItem(
+                source_key="rss:dev",
+                external_id="dev-3",
+                title="OpenHands ships a new developer app",
+                summary="OpenHands added a new desktop app for coding agents.",
+                body="OpenHands launched a new developer app for coding agents and repository workflows.",
+                url="https://example.com/dev-3",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "resources", "watchlist"],
+                importance=10.0,
+            ),
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        dev_block = next((card for card in cards if card.startswith("🧑‍💻 Dev tools:")), "")
+        self.assertTrue(dev_block)
+        self.assertIn("Cursor launches background coding agent", dev_block)
+        self.assertIn("Windsurf updates its IDE agents", dev_block)
+
 
 if __name__ == "__main__":
     unittest.main()

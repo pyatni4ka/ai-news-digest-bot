@@ -64,6 +64,7 @@ class Digest:
     buttons: list[DigestButton] = field(default_factory=list)
     section_map: dict[str, DigestSection] = field(default_factory=dict)
     image_paths: list[str] = field(default_factory=list)
+    story_media: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

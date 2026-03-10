@@ -89,22 +89,27 @@ class DigestService:
             evening_hour=self.settings.evening_hour,
         )
         items = [self._row_to_item(row) for row in self.repo.get_items_between(start_at, end_at)]
+        classify_items(items)
         items = deduplicate(items)
         sectioned = select_sections(items, slot=selected_slot)
         paragraph_count = self._paragraph_count_for_slot(selected_slot)
-        try:
-            summary = await self.summarizer.summarize(
-                selected_slot,
-                sectioned,
-                paragraph_count,
-            )
-        except Exception:
-            fallback = FallbackSummarizer()
-            summary = await fallback.summarize(
-                selected_slot,
-                sectioned,
-                paragraph_count,
-            )
+        total_section_items = sum(len(section) for section in sectioned.values())
+        if total_section_items < 2:
+            summary = ""
+        else:
+            try:
+                summary = await self.summarizer.summarize(
+                    selected_slot,
+                    sectioned,
+                    paragraph_count,
+                )
+            except Exception:
+                fallback = FallbackSummarizer()
+                summary = await fallback.summarize(
+                    selected_slot,
+                    sectioned,
+                    paragraph_count,
+                )
         digest = build_digest(
             selected_slot,
             items,
@@ -131,7 +136,6 @@ class DigestService:
         if row is None:
             return
         text, payload = self.repo.hydrate_digest(row)
-        await self._send_images(self.settings.admin_chat_id, payload.get("image_paths", []))
         reply_markup = (
             digest_inline_keyboard(int(row["id"]), payload)
             if self.settings.interactive_bot
@@ -143,6 +147,7 @@ class DigestService:
             parse_mode="HTML",
             reply_markup=reply_markup,
         )
+        await self._send_story_images(self.settings.admin_chat_id, payload.get("story_media", []))
 
     async def send_digest_section(self, chat_id: int, digest_id: int, section_key: str) -> None:
         row = self.repo.get_digest(digest_id)
@@ -288,6 +293,31 @@ class DigestService:
                     except TelegramBadRequest:
                         continue
 
+    async def _send_story_images(self, chat_id: int, story_media: list[dict]) -> None:
+        if not story_media:
+            return
+        sent = 0
+        for story in story_media:
+            images = story.get("image_paths", [])
+            if not images:
+                continue
+            photo_input = self._photo_input(images[0])
+            if photo_input is None:
+                continue
+            caption = self._story_image_caption(str(story.get("title", "")), str(story.get("url", "") or ""))
+            try:
+                await self.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_input,
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+                sent += 1
+            except TelegramBadRequest:
+                continue
+            if sent >= self.settings.max_images_per_digest:
+                break
+
     def _photo_input(self, image: str):
         if image.startswith(("http://", "https://")):
             return image
@@ -379,8 +409,13 @@ class DigestService:
             elif not body:
                 chunks.append(f"<b>{escape(label)}</b>")
             else:
-                chunks.append(f"<b>{escape(label)}</b>\n{escape(body)}")
+                chunks.append(f"<b>{escape(label)}</b>\n\n{escape(body)}")
         return "\n\n".join(chunks)[:4000]
+
+    def _story_image_caption(self, title: str, url: str) -> str:
+        if url:
+            return f"<b>К новости:</b> {escape(title)}\n{escape(url)}"
+        return f"<b>К новости:</b> {escape(title)}"
 
     def _split_label(self, paragraph: str) -> tuple[str | None, str]:
         for label in (

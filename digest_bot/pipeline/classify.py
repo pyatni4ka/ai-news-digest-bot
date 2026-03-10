@@ -68,13 +68,16 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
     "resources": (
         "open source",
         "github",
-        "app",
-        "tool",
-        "launch",
-        "available",
-        "beta",
+        "sdk",
+        "dataset",
+        "framework",
+        "extension",
         "plugin",
-        "editor",
+        "cli",
+        "api",
+        "agent",
+        "workflow",
+        "llm",
     ),
     "dev_tools": (
         "cursor",
@@ -174,6 +177,50 @@ SIGNAL_PATTERNS = (
     "open-source",
 )
 
+AI_RELEVANCE_PATTERNS = (
+    "artificial intelligence",
+    "generative ai",
+    "llm",
+    "foundation model",
+    "model",
+    "models",
+    "weights",
+    "checkpoint",
+    "inference",
+    "reasoning",
+    "multimodal",
+    "agent",
+    "agents",
+    "coding agent",
+    "developer tool",
+    "dev tool",
+    "ide",
+    "sdk",
+    "api",
+    "openai",
+    "chatgpt",
+    "anthropic",
+    "claude",
+    "google",
+    "gemini",
+    "deepmind",
+    "xai",
+    "grok",
+    "mistral",
+    "qwen",
+    "deepseek",
+    "llama",
+    "cursor",
+    "windsurf",
+    "copilot",
+    "codex",
+    "openhands",
+    "aider",
+    "comfyui",
+    "stable diffusion",
+    "flux",
+)
+
 
 def classify_items(items: list[NewsItem]) -> list[NewsItem]:
     for item in items:
@@ -234,7 +281,7 @@ def score_item(item: NewsItem) -> float:
 
 
 def item_haystack(item: NewsItem) -> str:
-    return _normalize(" ".join([item.title, item.summary, item.body, " ".join(item.tags)]))
+    return _normalize(" ".join([item.title, item.summary, item.body]))
 
 
 def is_noise_item(
@@ -265,6 +312,20 @@ def is_free_offer_item(item: NewsItem, haystack: str | None = None) -> bool:
     )
 
 
+def is_relevant_item(item: NewsItem, haystack: str | None = None) -> bool:
+    value = haystack or item_haystack(item)
+    categories = set(item.categories)
+    tags = set(item.tags)
+    core_categories = {"models", "release", "comparisons", "coding", "vibe_coding", "dev_tools", "watchlist"}
+    if categories & core_categories:
+        return True
+    if "resources" in categories and _has_ai_relevance(value):
+        return True
+    if {"official", "github_release", "sdk"} & tags and _has_ai_relevance(value):
+        return True
+    return False
+
+
 def _normalize(value: str) -> str:
     return value.lower().replace("-", " ")
 
@@ -275,3 +336,9 @@ def _looks_like_versioned_release(haystack: str) -> bool:
 
 def _looks_like_listicle(title: str) -> bool:
     return bool(re.search(r"\b\d+\s+(лучш|best|top)\w*\b", title))
+
+
+def _has_ai_relevance(haystack: str) -> bool:
+    if re.search(r"\bai\b", haystack):
+        return True
+    return any(pattern in haystack for pattern in AI_RELEVANCE_PATTERNS)

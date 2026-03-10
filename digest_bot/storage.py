@@ -254,6 +254,7 @@ class Repository:
                 for key, section in digest.section_map.items()
             },
             "image_paths": digest.image_paths,
+            "story_media": digest.story_media,
             "summary_payload": digest.summary_payload,
         }
         with self._connect() as conn:

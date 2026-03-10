@@ -7,6 +7,7 @@ from digest_bot.models import NewsItem
 from digest_bot.pipeline.classify import classify_items
 from digest_bot.pipeline.dedup import deduplicate, normalize_url
 from digest_bot.pipeline.digest_builder import (
+    build_story_media,
     build_story_cards,
     compute_window_with_hours,
     fallback_digest_paragraphs,
@@ -150,6 +151,38 @@ class PipelineTestCase(unittest.TestCase):
         headline_titles = [item.title for item in sections["headline"]]
         self.assertIn("Anthropic ships Claude Sonnet 4.6", headline_titles)
         self.assertNotIn("9 лучших промптов для учебы и работы", headline_titles)
+
+    def test_general_non_ai_items_are_filtered_from_sections(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="tg:noise",
+                external_id="noise-2",
+                title="Учим любой язык с нуля до С1 БЕСПЛАТНО",
+                summary="На YouTube нашли канал с десятками плейлистов для изучения языков.",
+                body="Десятки плейлистов для языков и учебы без какого-либо отношения к AI.",
+                url="https://example.com/noise-2",
+                published_at=now,
+                collected_at=now,
+                tags=["telegram", "coding", "engineering"],
+            ),
+            NewsItem(
+                source_key="rss:official",
+                external_id="release-2",
+                title="OpenAI launches new coding agent",
+                summary="New coding agent for repo editing and IDE workflows.",
+                body="OpenAI launched a new coding agent for repository editing and IDE workflows.",
+                url="https://example.com/release-2",
+                published_at=now,
+                collected_at=now,
+                tags=["official"],
+            ),
+        ]
+        classify_items(items)
+        sections = select_sections(items, slot="manual")
+        headline_titles = [item.title for item in sections["headline"]]
+        self.assertIn("OpenAI launches new coding agent", headline_titles)
+        self.assertNotIn("Учим любой язык с нуля до С1 БЕСПЛАТНО", headline_titles)
 
     def test_watchlist_release_scores_higher_than_generic_release(self) -> None:
         now = datetime.now(UTC)
@@ -338,6 +371,58 @@ class PipelineTestCase(unittest.TestCase):
                 "https://example.com/assets/item-1-cover.png",
                 "https://example.com/assets/item-2-cover.png",
                 "https://example.com/assets/item-3-cover.png",
+            ],
+        )
+
+    def test_build_story_media_attaches_one_image_per_main_story(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                db_id=101,
+                source_key="rss:model",
+                external_id="model-1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="Major model update for coding and agents.",
+                body="Anthropic released Claude Sonnet 4.6 with better coding and agent planning.",
+                url="https://example.com/model-1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding"],
+                importance=12.0,
+                images=["https://example.com/model-1-cover.png", "https://example.com/model-1-inline.png"],
+            ),
+            NewsItem(
+                db_id=102,
+                source_key="rss:dev",
+                external_id="dev-1",
+                title="Cursor launches background coding agent",
+                summary="Cursor added a new repo agent for IDE workflows.",
+                body="Cursor launched a background coding agent for repository tasks in the IDE.",
+                url="https://example.com/dev-1",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "watchlist"],
+                importance=11.0,
+                images=["https://example.com/dev-1-cover.png"],
+            ),
+        ]
+        sections = select_sections(items, slot="manual")
+        story_media = build_story_media("manual", sections, max_items=4)
+        self.assertEqual(
+            story_media,
+            [
+                {
+                    "title": "Claude Sonnet 4.6",
+                    "image_paths": ["https://example.com/model-1-cover.png"],
+                    "item_id": 101,
+                    "url": "https://example.com/model-1",
+                },
+                {
+                    "title": "Cursor launches background coding agent",
+                    "image_paths": ["https://example.com/dev-1-cover.png"],
+                    "item_id": 102,
+                    "url": "https://example.com/dev-1",
+                },
             ],
         )
 

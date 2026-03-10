@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from digest_bot.image_selection import ImageCandidate, is_usable_image_reference, select_best_image_candidates
 from digest_bot.models import Digest, DigestButton, DigestSection, NewsItem
+from digest_bot.pipeline.classify import is_relevant_item
 
 
 WATCHLIST_NAMES = (
@@ -157,6 +158,7 @@ def build_digest(
     paragraphs = split_paragraphs(summary_text, paragraph_count)
     if not paragraphs:
         paragraphs = fallback_digest_paragraphs(slot, sections)
+    story_media = build_story_media(slot, sections, max_items=4 if slot != "monthly" else 6)
 
     section_map = {
         key: DigestSection(
@@ -203,6 +205,7 @@ def build_digest(
         buttons=buttons,
         section_map=section_map,
         image_paths=image_paths,
+        story_media=story_media,
     )
 
 
@@ -318,6 +321,20 @@ def build_story_cards(
     sections: dict[str, list[NewsItem]],
     limit: int,
 ) -> list[str]:
+    selected_main, dev_items, minor_items = build_story_plan(slot, sections, limit)
+    paragraphs = [_story_card(item) for item in selected_main]
+    if dev_items:
+        paragraphs.append(_dev_tools_block(dev_items))
+    if minor_items:
+        paragraphs.append(_minor_block(minor_items))
+    return paragraphs[:limit]
+
+
+def build_story_plan(
+    slot: str,
+    sections: dict[str, list[NewsItem]],
+    limit: int,
+) -> tuple[list[NewsItem], list[NewsItem], list[NewsItem]]:
     dev_items = _dev_tool_items(sections, slot)
     reserved_slots = 1 if dev_items else 0
     main_limit = max(limit - reserved_slots - 1, 1)
@@ -341,12 +358,32 @@ def build_story_cards(
     minor_items = _minor_items(sections, selected_main + dev_items, 4 if slot == "monthly" else 3)
     if not minor_items:
         selected_main = main_candidates[: max(limit - reserved_slots, 1)]
-    paragraphs = [_story_card(item) for item in selected_main]
-    if dev_items:
-        paragraphs.append(_dev_tools_block(dev_items))
-    if minor_items:
-        paragraphs.append(_minor_block(minor_items))
-    return paragraphs[:limit]
+    return selected_main, dev_items, minor_items
+
+
+def build_story_media(slot: str, sections: dict[str, list[NewsItem]], max_items: int) -> list[dict[str, Any]]:
+    selected_main = unique_first(
+        sections.get("headline", [])
+        + sections.get("models", [])
+        + sections.get("coding", [])
+        + sections.get("dev_tools", [])
+        + sections.get("resources", []),
+        max(max_items * 3, 8),
+    )
+    story_media: list[dict[str, Any]] = []
+    for item in selected_main[:max_items]:
+        images = gather_images([item], 1)
+        if not images:
+            continue
+        story_media.append(
+            {
+                "title": _story_media_title(item),
+                "image_paths": images,
+                "item_id": item.db_id,
+                "url": item.url,
+            }
+        )
+    return story_media
 
 
 def _story_card(item: NewsItem, limit: int = 200) -> str:
@@ -364,6 +401,24 @@ def _display_title(item: NewsItem) -> str:
     if _is_model_release(item):
         return title.upper()
     return title
+
+
+def _story_media_title(item: NewsItem) -> str:
+    original = _strip_leading_decoration(" ".join(item.title.split()))
+    if ":" in original:
+        prefix = original.split(":", 1)[0].strip()
+        if len(prefix) >= 3:
+            return prefix
+    for pattern in MODEL_PATTERNS:
+        match = re.search(pattern, f"{item.title} {item.summary}", flags=re.IGNORECASE)
+        if match:
+            return " ".join(match.group(0).split())
+    conf_match = re.search(r"\bAI Native Conf\b", original, flags=re.IGNORECASE)
+    if conf_match:
+        return conf_match.group(0)
+    if len(original) > 90:
+        return original[:87].rstrip() + "..."
+    return original
 
 
 def _compact_fragment(value: str, limit: int) -> str:
@@ -424,11 +479,19 @@ def _dev_tools_block(items: list[NewsItem]) -> str:
 
 
 def _filter_relevant_items(items: list[NewsItem]) -> list[NewsItem]:
-    return [item for item in items if "noise" not in set(item.categories)]
+    relevant: list[NewsItem] = []
+    for item in items:
+        categories = set(item.categories)
+        if "noise" in categories:
+            continue
+        if not is_relevant_item(item):
+            continue
+        relevant.append(item)
+    return relevant
 
 
 def _localized_title(item: NewsItem) -> str:
-    title = " ".join(item.title.split())
+    title = _strip_leading_decoration(" ".join(item.title.split()))
     if _contains_cyrillic(title):
         return title
 
@@ -459,7 +522,7 @@ def _localized_title(item: NewsItem) -> str:
 def _localized_fragment(item: NewsItem, limit: int) -> str:
     source = item.summary or item.body or item.title
     if _contains_cyrillic(source):
-        return _compact_fragment(source, limit=limit)
+        return _compact_fragment(_trim_repeated_title(item, source), limit=limit)
 
     categories = set(item.categories)
     features = _extract_features(item)
@@ -561,15 +624,18 @@ def _contains_cyrillic(value: str) -> bool:
 
 def _extract_subject(item: NewsItem) -> str | None:
     title = " ".join(item.title.split())
-    combined = f"{title} {item.summary} {item.body}"
     for name in WATCHLIST_NAMES:
-        if re.search(re.escape(name), combined, flags=re.IGNORECASE):
+        if re.search(re.escape(name), title, flags=re.IGNORECASE):
             return name
     match = re.match(r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){0,2})", title)
     if match:
         subject = match.group(1)
         if subject.lower() not in GENERIC_SUBJECTS:
             return subject
+    summary = " ".join(item.summary.split())
+    for name in WATCHLIST_NAMES:
+        if re.search(re.escape(name), summary, flags=re.IGNORECASE):
+            return name
     return None
 
 
@@ -607,9 +673,9 @@ def _select_verb(item: NewsItem) -> str:
 
 
 def _extract_object(item: NewsItem, subject: str | None) -> str | None:
-    combined = " ".join(part for part in (item.title, item.summary, item.body) if part)
+    title_and_summary = " ".join(part for part in (item.title, item.summary) if part)
     for pattern in MODEL_PATTERNS:
-        match = re.search(pattern, combined, flags=re.IGNORECASE)
+        match = re.search(pattern, title_and_summary, flags=re.IGNORECASE)
         if match:
             found = " ".join(match.group(0).split())
             if not subject or found.lower() != subject.lower():
@@ -695,6 +761,21 @@ def _emoji_for_item(item: NewsItem) -> str:
     if any(term in haystack for term in ("agent", "automation", "workflow", "computer use")):
         return "🤖"
     return "📌"
+
+
+def _strip_leading_decoration(value: str) -> str:
+    cleaned = re.sub(r"^[^\wА-Яа-яЁё]+", "", value).strip()
+    return cleaned or value
+
+
+def _trim_repeated_title(item: NewsItem, source: str) -> str:
+    normalized_source = " ".join(source.split())
+    normalized_title = _strip_leading_decoration(" ".join(item.title.split())).rstrip(":.-—! ")
+    if normalized_title and normalized_source.lower().startswith(normalized_title.lower()):
+        trimmed = normalized_source[len(normalized_title):].lstrip(" :.-—!\n")
+        if trimmed:
+            return trimmed
+    return normalized_source
 
 
 def gather_links(items: list[NewsItem], limit: int) -> list[str]:

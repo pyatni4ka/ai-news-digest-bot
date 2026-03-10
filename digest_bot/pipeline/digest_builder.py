@@ -7,6 +7,7 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from digest_bot.image_selection import ImageCandidate, is_usable_image_reference, select_best_image_candidates
 from digest_bot.models import Digest, DigestButton, DigestSection, NewsItem
 
 
@@ -707,25 +708,33 @@ def gather_links(items: list[NewsItem], limit: int) -> list[str]:
 
 
 def gather_images(items: list[NewsItem], limit: int) -> list[str]:
-    images: list[str] = []
-    for item in items:
-        for image in item.images:
-            if not _is_usable_image(image):
+    ordered = sorted(items, key=lambda row: (row.importance, row.published_at), reverse=True)
+    primary: list[str] = []
+    overflow: list[str] = []
+    seen: set[str] = set()
+    for item in ordered:
+        ranked = select_best_image_candidates(
+            [ImageCandidate(url=image, source_hint="media") for image in item.images],
+            limit=3,
+            min_score=1,
+        )
+        if not ranked:
+            continue
+        best = ranked[0]
+        if best not in seen:
+            primary.append(best)
+            seen.add(best)
+        for extra in ranked[1:]:
+            if extra in seen:
                 continue
-            if image not in images:
-                images.append(image)
-            if len(images) >= limit:
-                return images
-    return images
+            overflow.append(extra)
+            seen.add(extra)
+    images = (primary + overflow)[:limit]
+    return [image for image in images if _is_usable_image(image)]
 
 
 def _is_usable_image(value: str) -> bool:
-    candidate = value.strip().lower()
-    if not candidate or candidate.startswith("data:"):
-        return False
-    if ".svg" in candidate or "placeholder" in candidate:
-        return False
-    return True
+    return is_usable_image_reference(value)
 
 
 def serialize_news_items(items: list[NewsItem]) -> list[dict[str, Any]]:

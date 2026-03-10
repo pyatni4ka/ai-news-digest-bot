@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 import html
+import re
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -10,6 +11,7 @@ import feedparser
 import httpx
 
 from digest_bot.collectors.base import Collector
+from digest_bot.image_selection import ImageCandidate, select_best_image_candidates
 from digest_bot.models import NewsItem, Source
 
 DEFAULT_HEADERS = {
@@ -99,19 +101,37 @@ def _parse_feed_datetime(entry: dict) -> datetime | None:
 
 
 def _extract_images(summary_html: str, entry: dict) -> list[str]:
-    images: list[str] = []
+    candidates: list[ImageCandidate] = []
     for media_key in ("media_content", "media_thumbnail"):
         for media in entry.get(media_key, []):
             url = media.get("url")
-            if url and url not in images:
-                images.append(url)
+            if url:
+                candidates.append(
+                    ImageCandidate(
+                        url=str(url),
+                        source_hint="media",
+                        width=_parse_dimension(media.get("width")),
+                        height=_parse_dimension(media.get("height")),
+                    )
+                )
     if summary_html:
         soup = BeautifulSoup(summary_html, "html.parser")
         for image in soup.find_all("img"):
-            src = image.get("src")
-            if src and src not in images:
-                images.append(src)
-    return images[:4]
+            src = _image_source_from_tag(image)
+            if not src:
+                continue
+            candidates.append(
+                ImageCandidate(
+                    url=src,
+                    source_hint="img",
+                    alt=str(image.get("alt", "")),
+                    class_names=tuple(str(value) for value in image.get("class", []) if value),
+                    element_id=str(image.get("id", "")),
+                    width=_parse_dimension(image.get("width")),
+                    height=_parse_dimension(image.get("height")),
+                )
+            )
+    return select_best_image_candidates(candidates, limit=3, min_score=10)
 
 
 def _strip_html(value: str) -> str:
@@ -119,3 +139,24 @@ def _strip_html(value: str) -> str:
         return ""
     soup = BeautifulSoup(value, "html.parser")
     return " ".join(chunk.strip() for chunk in soup.stripped_strings)
+
+
+def _image_source_from_tag(image) -> str | None:
+    for attr in ("src", "data-src", "data-image"):
+        value = image.get(attr)
+        if value:
+            return str(value)
+    for attr in ("srcset", "data-srcset"):
+        value = image.get(attr)
+        if value:
+            first = str(value).split(",")[0].strip().split(" ")[0]
+            if first:
+                return first
+    return None
+
+
+def _parse_dimension(value: object) -> int | None:
+    if value is None:
+        return None
+    match = re.search(r"\d+", str(value))
+    return int(match.group(0)) if match else None

@@ -3,8 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import unittest
 
+from bs4 import BeautifulSoup
+
+from digest_bot.collectors.rss import _extract_images as _extract_rss_images
 from digest_bot.collectors.rss import _parse_feed_datetime
-from digest_bot.collectors.webpage import _extract_article_candidates, _parse_article
+from digest_bot.collectors.webpage import (
+    _extract_article_candidates,
+    _extract_images as _extract_webpage_images,
+    _parse_article,
+)
 from digest_bot.models import Source
 
 
@@ -49,6 +56,58 @@ class CollectorParsingTestCase(unittest.TestCase):
         """
         item = _parse_article(source, "https://example.com/blog/old-post", html, None)
         self.assertIsNone(item)
+
+    def test_webpage_images_prefer_cover_over_placeholders_and_icons(self) -> None:
+        html = """
+        <html>
+          <head>
+            <meta property="og:image" content="https://example.com/images/story-cover.png">
+          </head>
+          <body>
+            <header><img src="/assets/logo.svg" class="site-logo"></header>
+            <article>
+              <img src="/assets/placeholder.svg" class="announcement-bar_logo">
+              <img src="/assets/google.svg" class="icon-24">
+              <figure><img src="/assets/story-inline.webp" width="1200" height="630" alt="Story cover"></figure>
+            </article>
+          </body>
+        </html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        soup_images = _extract_webpage_images(soup, "https://example.com/post")
+        self.assertEqual(
+            soup_images,
+            [
+                "https://example.com/images/story-cover.png",
+                "https://example.com/assets/story-inline.webp",
+            ],
+        )
+
+    def test_rss_images_filter_bad_assets(self) -> None:
+        summary_html = """
+        <div>
+          <img src="https://example.com/assets/placeholder.svg" class="announcement-bar_logo">
+          <img src="https://example.com/assets/site-logo.png" class="logo">
+          <img src="https://example.com/assets/story-preview.png" width="1280" height="720" alt="Story preview">
+        </div>
+        """
+        entry = {
+            "media_content": [
+                {
+                    "url": "https://example.com/assets/story-cover.png",
+                    "width": "1600",
+                    "height": "900",
+                }
+            ]
+        }
+        images = _extract_rss_images(summary_html, entry)
+        self.assertEqual(
+            images,
+            [
+                "https://example.com/assets/story-cover.png",
+                "https://example.com/assets/story-preview.png",
+            ],
+        )
 
 
 if __name__ == "__main__":

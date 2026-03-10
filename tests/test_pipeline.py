@@ -10,6 +10,7 @@ from digest_bot.pipeline.digest_builder import (
     build_story_cards,
     compute_window_with_hours,
     fallback_digest_paragraphs,
+    gather_images,
     select_sections,
 )
 
@@ -262,6 +263,51 @@ class PipelineTestCase(unittest.TestCase):
         self.assertTrue(cards)
         self.assertIn("выпустила", cards[0].lower())
         self.assertIn("Релиз сфокусирован", cards[0])
+
+    def test_gather_images_prefers_one_cover_per_item_before_extras(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:one",
+                external_id="1",
+                title="One",
+                summary="",
+                body="",
+                url="https://example.com/1",
+                published_at=now,
+                collected_at=now,
+                importance=10.0,
+                images=[
+                    "https://example.com/assets/logo.svg",
+                    "https://example.com/assets/story-one-cover.png",
+                    "https://example.com/assets/story-one-inline.png",
+                ],
+            ),
+            NewsItem(
+                source_key="rss:two",
+                external_id="2",
+                title="Two",
+                summary="",
+                body="",
+                url="https://example.com/2",
+                published_at=now,
+                collected_at=now,
+                importance=9.0,
+                images=[
+                    "https://example.com/assets/placeholder.svg",
+                    "https://example.com/assets/story-two-cover.png",
+                    "https://example.com/assets/story-two-inline.png",
+                ],
+            ),
+        ]
+        images = gather_images(items, 4)
+        self.assertEqual(
+            images[:2],
+            [
+                "https://example.com/assets/story-one-cover.png",
+                "https://example.com/assets/story-two-cover.png",
+            ],
+        )
 
 
 if __name__ == "__main__":

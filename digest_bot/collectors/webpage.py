@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import httpx
 
 from digest_bot.collectors.base import Collector
+from digest_bot.image_selection import ImageCandidate, select_best_image_candidates
 from digest_bot.models import NewsItem, Source
 
 DEFAULT_HEADERS = {
@@ -229,23 +230,59 @@ def _extract_body_text(soup: BeautifulSoup) -> str:
 
 
 def _extract_images(soup: BeautifulSoup, article_url: str) -> list[str]:
-    images: list[str] = []
-    for selector in (
-        "meta[property='og:image']",
-        "meta[name='twitter:image']",
-        "img",
-    ):
-        if selector == "img":
-            for image in soup.find_all("img"):
-                src = image.get("src")
-                if src:
-                    absolute = urljoin(article_url, src)
-                    if absolute not in images:
-                        images.append(absolute)
-        else:
-            meta = soup.select_one(selector)
-            if meta and meta.get("content"):
-                absolute = urljoin(article_url, str(meta["content"]))
-                if absolute not in images:
-                    images.append(absolute)
-    return images[:4]
+    candidates: list[ImageCandidate] = []
+    for selector in ("meta[property='og:image']", "meta[name='twitter:image']"):
+        meta = soup.select_one(selector)
+        if meta and meta.get("content"):
+            candidates.append(ImageCandidate(url=str(meta["content"]), source_hint="meta"))
+
+    for image in soup.find_all("img"):
+        src = _image_source_from_tag(image)
+        if not src:
+            continue
+        candidates.append(
+            ImageCandidate(
+                url=src,
+                source_hint="img",
+                alt=str(image.get("alt", "")),
+                class_names=tuple(str(value) for value in image.get("class", []) if value),
+                element_id=str(image.get("id", "")),
+                width=_parse_dimension(image.get("width")),
+                height=_parse_dimension(image.get("height")),
+                parent_tags=_ancestor_tags(image),
+            )
+        )
+
+    return select_best_image_candidates(candidates, limit=3, base_url=article_url, min_score=10)
+
+
+def _image_source_from_tag(image) -> str | None:
+    for attr in ("src", "data-src", "data-image"):
+        value = image.get(attr)
+        if value:
+            return str(value)
+    for attr in ("srcset", "data-srcset"):
+        value = image.get(attr)
+        if value:
+            first = str(value).split(",")[0].strip().split(" ")[0]
+            if first:
+                return first
+    return None
+
+
+def _ancestor_tags(image, depth: int = 4) -> tuple[str, ...]:
+    tags: list[str] = []
+    current = image.parent
+    for _ in range(depth):
+        if current is None or not getattr(current, "name", None):
+            break
+        tags.append(str(current.name))
+        current = current.parent
+    return tuple(tags)
+
+
+def _parse_dimension(value: object) -> int | None:
+    if value is None:
+        return None
+    match = re.search(r"\d+", str(value))
+    return int(match.group(0)) if match else None

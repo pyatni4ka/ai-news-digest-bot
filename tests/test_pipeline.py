@@ -309,6 +309,38 @@ class PipelineTestCase(unittest.TestCase):
             ],
         )
 
+    def test_gather_images_skips_extras_when_enough_primary_images_exist(self) -> None:
+        now = datetime.now(UTC)
+        items = []
+        for index in range(5):
+            items.append(
+                NewsItem(
+                    source_key=f"rss:{index}",
+                    external_id=str(index),
+                    title=f"Item {index}",
+                    summary="",
+                    body="",
+                    url=f"https://example.com/{index}",
+                    published_at=now,
+                    collected_at=now,
+                    importance=10.0 - index,
+                    images=[
+                        f"https://example.com/assets/item-{index}-cover.png",
+                        f"https://example.com/assets/item-{index}-inline.png",
+                    ],
+                )
+            )
+        images = gather_images(items, 4)
+        self.assertEqual(
+            images,
+            [
+                "https://example.com/assets/item-0-cover.png",
+                "https://example.com/assets/item-1-cover.png",
+                "https://example.com/assets/item-2-cover.png",
+                "https://example.com/assets/item-3-cover.png",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

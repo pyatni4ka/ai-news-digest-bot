@@ -729,7 +729,9 @@ def gather_images(items: list[NewsItem], limit: int) -> list[str]:
                 continue
             overflow.append(extra)
             seen.add(extra)
-    images = (primary + overflow)[:limit]
+    images = primary[:limit]
+    if len(images) < min(limit, 4):
+        images = (primary + overflow)[:limit]
     return [image for image in images if _is_usable_image(image)]
 
 

@@ -21,7 +21,13 @@ from digest_bot.config import Settings, load_default_sources
 from digest_bot.models import Digest, NewsItem, Source
 from digest_bot.pipeline.classify import classify_items
 from digest_bot.pipeline.dedup import deduplicate
-from digest_bot.pipeline.digest_builder import build_digest, compute_window_with_hours, gather_images, select_sections
+from digest_bot.pipeline.digest_builder import (
+    build_digest,
+    build_story_sequence,
+    compute_window_with_hours,
+    gather_images,
+    select_sections,
+)
 from digest_bot.storage import Repository
 from digest_bot.summarizers.fallback import FallbackSummarizer
 from digest_bot.summarizers.http_compat import OpenAICompatibleSummarizer
@@ -92,6 +98,11 @@ class DigestService:
         classify_items(items)
         items = deduplicate(items)
         sectioned = select_sections(items, slot=selected_slot)
+        story_sequence = build_story_sequence(
+            selected_slot,
+            sectioned,
+            self._paragraph_count_for_slot(selected_slot),
+        )
         paragraph_count = self._paragraph_count_for_slot(selected_slot)
         total_section_items = sum(len(section) for section in sectioned.values())
         if total_section_items < 2:
@@ -100,7 +111,7 @@ class DigestService:
             try:
                 summary = await self.summarizer.summarize(
                     selected_slot,
-                    sectioned,
+                    {**sectioned, "story_order": story_sequence},
                     paragraph_count,
                 )
             except Exception:
@@ -143,7 +154,7 @@ class DigestService:
         )
         await self.bot.send_message(
             chat_id=self.settings.admin_chat_id,
-            text=self._format_digest_html(str(row["title"]), text, str(row["slot"])),
+            text=self._format_digest_html(str(row["title"]), text, str(row["slot"]), payload),
             parse_mode="HTML",
             reply_markup=reply_markup,
         )
@@ -173,7 +184,7 @@ class DigestService:
         if row is None:
             return ("Дайджест пока не найден.", {})
         text, payload = self.repo.hydrate_digest(row)
-        return (self._format_digest_html(str(row["title"]), text, str(row["slot"])), payload)
+        return (self._format_digest_html(str(row["title"]), text, str(row["slot"]), payload), payload)
 
     def render_digest_details(self, digest_id: int) -> str:
         row = self.repo.get_digest(digest_id)
@@ -397,19 +408,24 @@ class DigestService:
             return max(self.settings.default_digest_paragraphs, 10)
         return max(self.settings.default_digest_paragraphs, 6)
 
-    def _format_digest_html(self, title: str, text: str, slot: str) -> str:
+    def _format_digest_html(self, title: str, text: str, slot: str, payload: dict | None = None) -> str:
         raw_paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
         paragraphs = [self._normalize_paragraph(paragraph) for paragraph in raw_paragraphs]
+        story_links = (payload or {}).get("summary_payload", {}).get("story_links", [])
         chunks = [f"<b>{escape(title)}</b>"]
         max_paragraphs = 12 if slot == "monthly" else 7
-        for paragraph in paragraphs[:max_paragraphs]:
+        for index, paragraph in enumerate(paragraphs[:max_paragraphs]):
             label, body = self._split_label(paragraph)
             if label is None:
-                chunks.append(escape(paragraph))
+                block = escape(paragraph)
             elif not body:
-                chunks.append(f"<b>{escape(label)}</b>")
+                block = f"<b>{escape(label)}</b>"
             else:
-                chunks.append(f"<b>{escape(label)}</b>\n\n{escape(body)}")
+                block = f"<b>{escape(label)}</b>\n\n{escape(body)}"
+            link = story_links[index] if index < len(story_links) else None
+            if link:
+                block = f"{block}\n\n<a href=\"{escape(link)}\">Пост</a>"
+            chunks.append(block)
         return "\n\n".join(chunks)[:4000]
 
     def _story_image_caption(self, title: str, url: str) -> str:

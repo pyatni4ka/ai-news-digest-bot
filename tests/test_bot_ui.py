@@ -21,14 +21,9 @@ class BotKeyboardTestCase(unittest.TestCase):
         keyboard = digest_inline_keyboard(42, {"sections": {}, "summary_payload": {}})
         labels = [button.text for row in keyboard.inline_keyboard for button in row]
         self.assertIn("Дайджест сейчас", labels)
-        self.assertIn("За сегодня", labels)
-        self.assertIn("Модели", labels)
-        self.assertIn("Watchlist", labels)
-        self.assertIn("Бесплатно", labels)
-        self.assertIn("Dev tools", labels)
-        self.assertIn("Ресурсы", labels)
+        self.assertEqual(labels, ["Дайджест сейчас"])
 
-    def test_static_keyboard_uses_section_links(self) -> None:
+    def test_static_keyboard_has_only_manual_digest_button(self) -> None:
         keyboard = digest_static_keyboard(
             {
                 "sections": {
@@ -37,52 +32,19 @@ class BotKeyboardTestCase(unittest.TestCase):
                     "dev_tools": {"links": ["https://example.com/dev"]},
                     "freebies": {"links": ["https://example.com/free"]},
                     "resources": {"links": ["https://example.com/resource"]},
-                },
-            }
+                }
+            },
+            "https://github.com/example/actions/workflows/x.yml",
         )
         self.assertIsNotNone(keyboard)
         labels = [button.text for row in keyboard.inline_keyboard for button in row]
-        self.assertIn("Модели", labels)
-        self.assertIn("Watchlist", labels)
-        self.assertIn("Dev tools", labels)
-        self.assertIn("Бесплатно", labels)
-        self.assertIn("Ресурсы", labels)
+        self.assertEqual(labels, ["Дайджест сейчас"])
 
     def test_static_keyboard_supports_manual_digest_url(self) -> None:
         keyboard = digest_static_keyboard({"sections": {}}, "https://github.com/example/actions/workflows/x.yml")
         self.assertIsNotNone(keyboard)
         labels = [button.text for row in keyboard.inline_keyboard for button in row]
         self.assertIn("Дайджест сейчас", labels)
-
-    def test_static_keyboard_avoids_reusing_same_url(self) -> None:
-        keyboard = digest_static_keyboard(
-            {
-                "sections": {
-                    "models": {
-                        "links": [
-                            "https://site-a.example.com/model",
-                            "https://site-b.example.com/model-2",
-                        ]
-                    },
-                    "dev_tools": {
-                        "links": [
-                            "https://site-a.example.com/model",
-                            "https://site-c.example.com/dev",
-                        ]
-                    },
-                    "coding": {
-                        "links": [
-                            "https://site-a.example.com/model",
-                            "https://site-d.example.com/coding",
-                        ]
-                    },
-                }
-            }
-        )
-        self.assertIsNotNone(keyboard)
-        urls = [button.url for row in keyboard.inline_keyboard for button in row]
-        self.assertEqual(len(urls), len(set(urls)))
-
 
 if __name__ == "__main__":
     unittest.main()

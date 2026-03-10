@@ -9,9 +9,11 @@ from digest_bot.pipeline.dedup import deduplicate, normalize_url
 from digest_bot.pipeline.digest_builder import (
     build_story_media,
     build_story_cards,
+    build_story_sequence,
     compute_window_with_hours,
     fallback_digest_paragraphs,
     gather_images,
+    match_story_items_to_paragraphs,
     select_sections,
 )
 
@@ -83,7 +85,7 @@ class PipelineTestCase(unittest.TestCase):
         self.assertTrue(paragraphs[0].startswith("🚀"))
         self.assertIn(":", paragraphs[0])
         self.assertIn("РЕЛИЗ AI-МОДЕЛИ", paragraphs[0])
-        self.assertTrue(any(paragraph.startswith("🗞 Короткой строкой:") for paragraph in paragraphs))
+        self.assertGreaterEqual(len(paragraphs), 6)
 
     def test_free_items_are_marked(self) -> None:
         now = datetime.now(UTC)
@@ -270,10 +272,8 @@ class PipelineTestCase(unittest.TestCase):
         ]
         sections = select_sections(items, slot="manual")
         cards = build_story_cards("manual", sections, 6)
-        dev_block = next((card for card in cards if card.startswith("🧑‍💻 Dev tools:")), "")
-        self.assertTrue(dev_block)
-        self.assertIn("Cursor запустила background coding agent", dev_block)
-        self.assertIn("Windsurf обновила IDE-агентов", dev_block)
+        self.assertTrue(any("Cursor запустила background coding agent" in card for card in cards))
+        self.assertTrue(any("Windsurf обновила IDE-агентов" in card for card in cards))
 
     def test_english_items_are_localized_to_russian_in_fallback(self) -> None:
         now = datetime.now(UTC)
@@ -425,6 +425,43 @@ class PipelineTestCase(unittest.TestCase):
                 },
             ],
         )
+
+    def test_match_story_items_to_paragraphs_uses_title_similarity(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                db_id=1,
+                source_key="rss:model",
+                external_id="model-1",
+                title="Introducing Sonnet 4.6",
+                summary="Claude Sonnet 4.6 is the new model for coding and long context.",
+                body="",
+                url="https://example.com/sonnet",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding"],
+                importance=10.0,
+            ),
+            NewsItem(
+                db_id=2,
+                source_key="rss:dev",
+                external_id="dev-1",
+                title="DeepSWE: Training a Fully Open-sourced Coding Agent",
+                summary="DeepSWE-Preview reached a high score on SWE-Bench.",
+                body="",
+                url="https://example.com/deepswe",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools"],
+                importance=9.0,
+            ),
+        ]
+        paragraphs = [
+            "🤖 CLAUDE SONNET 4.6: Anthropic выпустила обновлённую модель для coding.",
+            "🧠 DEEPSWE-PREVIEW: Together AI представила coding agent с высоким результатом на SWE-Bench.",
+        ]
+        matched = match_story_items_to_paragraphs(paragraphs, items)
+        self.assertEqual([item.db_id if item else None for item in matched], [1, 2])
 
 
 if __name__ == "__main__":

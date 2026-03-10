@@ -42,7 +42,7 @@ WATCHLIST_NAMES = (
 )
 
 MODEL_PATTERNS = (
-    r"Claude(?:\s+(?:Sonnet|Opus|Haiku))?\s+[A-Za-z0-9.\-]+",
+    r"Claude(?:\s+(?:Sonnet|Opus|Haiku)(?:\s+[A-Za-z0-9.\-]+)?)",
     r"GPT[-\s]?[A-Za-z0-9.\-]+",
     r"Gemini\s+[A-Za-z0-9.\-]+",
     r"Grok\s+[A-Za-z0-9.\-]+",
@@ -151,6 +151,7 @@ def build_digest(
         evening_hour=evening_hour,
     )
     sections = select_sections(items, slot=slot)
+    story_items = build_story_sequence(slot, sections, paragraph_count)
     resource_links = gather_links(sections["resources"], 5)
     model_links = gather_links(sections["models"], 3)
     dev_tool_links = gather_links(sections["dev_tools"], 3)
@@ -158,7 +159,8 @@ def build_digest(
     paragraphs = split_paragraphs(summary_text, paragraph_count)
     if not paragraphs:
         paragraphs = fallback_digest_paragraphs(slot, sections)
-    story_media = build_story_media(slot, sections, max_items=4 if slot != "monthly" else 6)
+    matched_story_items = match_story_items_to_paragraphs(paragraphs, story_items)
+    story_media = build_story_media_for_items(matched_story_items, max_items=4 if slot != "monthly" else 6)
 
     section_map = {
         key: DigestSection(
@@ -172,22 +174,7 @@ def build_digest(
         if section_items
     }
 
-    buttons = [
-        DigestButton(text="Подробнее", action="more"),
-        DigestButton(text="Только coding", action="section", value="coding"),
-        DigestButton(text="Только dev tools", action="section", value="dev_tools"),
-        DigestButton(text="Только vibe coding", action="section", value="vibe_coding"),
-        DigestButton(text="Ресурсы", action="links", value="resources"),
-        DigestButton(
-            text="Открыть модель",
-            action="open_model",
-            url=model_links[0] if model_links else None,
-        ),
-        DigestButton(text="Сохранить", action="save"),
-        DigestButton(text="Меньше такого", action="noise"),
-        DigestButton(text="Обновить сейчас", action="refresh"),
-    ]
-    buttons = [button for button in buttons if button.url or button.action != "open_model"]
+    buttons = [DigestButton(text="Дайджест сейчас", action="refresh")]
 
     return Digest(
         slot=slot,
@@ -200,6 +187,7 @@ def build_digest(
             "resource_links": resource_links,
             "model_links": model_links,
             "dev_tool_links": dev_tool_links,
+            "story_links": [item.url if item else None for item in matched_story_items[: len(paragraphs)]],
             "generated_at": now.isoformat(),
         },
         buttons=buttons,
@@ -321,13 +309,36 @@ def build_story_cards(
     sections: dict[str, list[NewsItem]],
     limit: int,
 ) -> list[str]:
-    selected_main, dev_items, minor_items = build_story_plan(slot, sections, limit)
-    paragraphs = [_story_card(item) for item in selected_main]
-    if dev_items:
-        paragraphs.append(_dev_tools_block(dev_items))
-    if minor_items:
-        paragraphs.append(_minor_block(minor_items))
-    return paragraphs[:limit]
+    return [_story_card(item) for item in build_story_sequence(slot, sections, limit)]
+
+
+def build_story_sequence(
+    slot: str,
+    sections: dict[str, list[NewsItem]],
+    limit: int,
+) -> list[NewsItem]:
+    selected_main, dev_items, minor_items = build_story_plan(slot, sections, max(limit, 6))
+    sequence = unique_first(selected_main + dev_items + minor_items, limit)
+    if len(sequence) < limit:
+        pool = unique_first(
+            sections.get("headline", [])
+            + sections.get("models", [])
+            + sections.get("coding", [])
+            + sections.get("dev_tools", [])
+            + sections.get("watchlist", [])
+            + sections.get("resources", []),
+            limit * 3,
+        )
+        existing = {item.dedup_key or item.title for item in sequence}
+        for item in pool:
+            key = item.dedup_key or item.title
+            if key in existing:
+                continue
+            sequence.append(item)
+            existing.add(key)
+            if len(sequence) >= limit:
+                break
+    return sequence[:limit]
 
 
 def build_story_plan(
@@ -362,16 +373,15 @@ def build_story_plan(
 
 
 def build_story_media(slot: str, sections: dict[str, list[NewsItem]], max_items: int) -> list[dict[str, Any]]:
-    selected_main = unique_first(
-        sections.get("headline", [])
-        + sections.get("models", [])
-        + sections.get("coding", [])
-        + sections.get("dev_tools", [])
-        + sections.get("resources", []),
-        max(max_items * 3, 8),
-    )
+    selected_main = build_story_sequence(slot, sections, max_items)
+    return build_story_media_for_items(selected_main, max_items)
+
+
+def build_story_media_for_items(items: list[NewsItem | None], max_items: int) -> list[dict[str, Any]]:
     story_media: list[dict[str, Any]] = []
-    for item in selected_main[:max_items]:
+    for item in items[:max_items]:
+        if item is None:
+            continue
         images = gather_images([item], 1)
         if not images:
             continue
@@ -384,6 +394,29 @@ def build_story_media(slot: str, sections: dict[str, list[NewsItem]], max_items:
             }
         )
     return story_media
+
+
+def match_story_items_to_paragraphs(
+    paragraphs: list[str],
+    candidates: list[NewsItem],
+) -> list[NewsItem | None]:
+    available = list(candidates)
+    matched: list[NewsItem | None] = []
+    for paragraph in paragraphs:
+        best_index = -1
+        best_score = -1
+        for index, item in enumerate(available):
+            score = _score_paragraph_match(paragraph, item)
+            if score > best_score:
+                best_score = score
+                best_index = index
+        if best_index >= 0 and best_score > 0:
+            matched.append(available.pop(best_index))
+        elif available:
+            matched.append(available.pop(0))
+        else:
+            matched.append(None)
+    return matched
 
 
 def _story_card(item: NewsItem, limit: int = 200) -> str:
@@ -761,6 +794,47 @@ def _emoji_for_item(item: NewsItem) -> str:
     if any(term in haystack for term in ("agent", "automation", "workflow", "computer use")):
         return "🤖"
     return "📌"
+
+
+def _score_paragraph_match(paragraph: str, item: NewsItem) -> int:
+    paragraph_text = _normalize_match_text(paragraph)
+    title = _normalize_match_text(item.title)
+    summary = _normalize_match_text(item.summary)
+    media_title = _normalize_match_text(_story_media_title(item))
+    score = 0
+
+    if media_title and media_title in paragraph_text:
+        score += 120
+    if title and title in paragraph_text:
+        score += 100
+
+    for pattern in MODEL_PATTERNS:
+        match = re.search(pattern, f"{item.title} {item.summary}", flags=re.IGNORECASE)
+        if match:
+            normalized = _normalize_match_text(match.group(0))
+            if normalized and normalized in paragraph_text:
+                score += 140
+
+    paragraph_tokens = set(_match_tokens(paragraph_text))
+    item_tokens = set(_match_tokens(f"{title} {summary} {media_title}"))
+    overlap = paragraph_tokens & item_tokens
+    score += len(overlap) * 8
+
+    for name in WATCHLIST_NAMES:
+        normalized_name = _normalize_match_text(name)
+        if normalized_name and normalized_name in paragraph_text and normalized_name in f"{title} {summary}":
+            score += 25
+
+    return score
+
+
+def _normalize_match_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.lower()).strip()
+
+
+def _match_tokens(value: str) -> list[str]:
+    tokens = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9.+-]{2,}", value, flags=re.IGNORECASE)
+    return [token for token in tokens if token not in {"with", "from", "this", "that", "news"}]
 
 
 def _strip_leading_decoration(value: str) -> str:

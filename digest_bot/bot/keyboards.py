@@ -43,76 +43,15 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(text="Подробнее", callback_data=f"dg:more:{digest_id}"),
-            InlineKeyboardButton(text="Дайджест сейчас", callback_data="dg:refresh:now"),
-        ],
-        [
-            InlineKeyboardButton(text="За сегодня", callback_data="dg:refresh:today"),
-            InlineKeyboardButton(text="Модели", callback_data=f"dg:sec:{digest_id}:models"),
-        ],
-        [
-            InlineKeyboardButton(text="Coding", callback_data=f"dg:sec:{digest_id}:coding"),
-            InlineKeyboardButton(text="Watchlist", callback_data=f"dg:sec:{digest_id}:watchlist"),
-        ],
-        [
-            InlineKeyboardButton(
-                text="Dev tools",
-                callback_data=f"dg:sec:{digest_id}:dev_tools",
-            ),
-            InlineKeyboardButton(
-                text="Vibe coding",
-                callback_data=f"dg:sec:{digest_id}:vibe_coding",
-            ),
-        ],
-        [
-            InlineKeyboardButton(text="Сравнения", callback_data=f"dg:sec:{digest_id}:comparisons"),
-            InlineKeyboardButton(text="Бесплатно", callback_data=f"dg:sec:{digest_id}:freebies"),
-        ],
-        [
-            InlineKeyboardButton(text="Ресурсы", callback_data=f"dg:sec:{digest_id}:resources"),
-        ],
-        [
-            InlineKeyboardButton(text="Сохранить", callback_data=f"dg:save:{digest_id}"),
-            InlineKeyboardButton(text="Меньше такого", callback_data=f"dg:noise:{digest_id}"),
-        ],
-    ]
+    rows = [[InlineKeyboardButton(text="Дайджест сейчас", callback_data="dg:refresh:now")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def digest_static_keyboard(payload: dict, manual_digest_url: str | None = None) -> InlineKeyboardMarkup | None:
-    sections = payload.get("sections", {})
-    section_specs = [
-        ("Дайджест сейчас", manual_digest_url),
-        ("Модели", sections.get("models", {}).get("links", [])),
-        ("Watchlist", sections.get("watchlist", {}).get("links", [])),
-        ("Dev tools", sections.get("dev_tools", {}).get("links", [])),
-        ("Coding", sections.get("coding", {}).get("links", [])),
-        ("Vibe coding", sections.get("vibe_coding", {}).get("links", [])),
-        ("Сравнения", sections.get("comparisons", {}).get("links", [])),
-        ("Бесплатно", sections.get("freebies", {}).get("links", [])),
-        ("Ресурсы", sections.get("resources", {}).get("links", [])),
-    ]
-    rows: list[list[InlineKeyboardButton]] = []
-    current_row: list[InlineKeyboardButton] = []
-    used_urls: set[str] = set()
-    used_domains: set[str] = set()
-    for label, links in section_specs:
-        selected = _pick_topic_link(links, used_urls, used_domains)
-        if not selected:
-            continue
-        used_urls.add(selected)
-        domain = urlparse(selected).netloc
-        if domain:
-            used_domains.add(domain)
-        current_row.append(InlineKeyboardButton(text=label, url=selected))
-        if len(current_row) == 2:
-            rows.append(current_row)
-            current_row = []
-    if current_row:
-        rows.append(current_row)
-    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+    if not manual_digest_url:
+        return None
+    rows = [[InlineKeyboardButton(text="Дайджест сейчас", url=manual_digest_url)]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def links_keyboard(urls: list[str], prefix: str) -> InlineKeyboardMarkup | None:

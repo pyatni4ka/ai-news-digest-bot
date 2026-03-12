@@ -7,4 +7,3 @@ build:
   skip: false
 run:
   persistenceMount: /app/data
-  containerPort: "0"

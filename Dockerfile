@@ -6,7 +6,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY pyproject.toml .
+COPY pyproject.toml README.md ./
+COPY .env.amvera* ./
 COPY digest_bot/ digest_bot/
 COPY config/ config/
 
@@ -14,6 +15,7 @@ RUN pip install --no-cache-dir .
 
 RUN mkdir -p /app/data/media
 
+ENV APP_ROOT=/app
 ENV PYTHONUNBUFFERED=1
 ENV DB_PATH=/app/data/digest.db
 ENV MEDIA_DIR=/app/data/media

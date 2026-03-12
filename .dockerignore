@@ -6,4 +6,3 @@ data
 *.egg-info
 .claude
 .env
-.env.*

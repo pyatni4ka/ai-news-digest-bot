@@ -40,6 +40,9 @@ class Settings:
 
 
 def project_root() -> Path:
+    app_root = os.getenv("APP_ROOT")
+    if app_root:
+        return Path(app_root)
     return Path(__file__).resolve().parent.parent
 
 

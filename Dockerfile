@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir .
 
 RUN mkdir -p /app/data/media
 
+ENV PYTHONUNBUFFERED=1
 ENV DB_PATH=/app/data/digest.db
 ENV MEDIA_DIR=/app/data/media
 

@@ -46,6 +46,7 @@ def project_root() -> Path:
 def load_settings() -> Settings:
     root = project_root()
     load_dotenv(root / ".env")
+    load_dotenv(root / ".env.amvera")
 
     db_path = _resolve_path(os.getenv("DB_PATH", "data/digest.db"), root)
     media_dir = _resolve_path(os.getenv("MEDIA_DIR", "data/media"), root)

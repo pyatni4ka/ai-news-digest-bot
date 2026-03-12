@@ -19,7 +19,7 @@ class TelegramCollector(Collector):
         if settings.tg_session_string:
             session: StringSession | str = StringSession(settings.tg_session_string)
         else:
-            session_path = project_root() / f"{settings.tg_session_name}.session"
+            session_path = settings.db_path.parent / f"{settings.tg_session_name}.session"
             session = str(session_path)
         self._client = TelegramClient(
             session,

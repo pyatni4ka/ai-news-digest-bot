@@ -295,7 +295,74 @@ class PipelineTestCase(unittest.TestCase):
         cards = build_story_cards("manual", sections, 6)
         self.assertTrue(cards)
         self.assertIn("выпустила", cards[0].lower())
-        self.assertIn("Релиз сфокусирован", cards[0])
+        # Body sentence is extracted instead of a template phrase
+        self.assertIn("Claude Sonnet 4.6", cards[0])
+
+    def test_fallback_uses_template_when_body_is_empty(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:model",
+                external_id="tmpl-1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="",
+                body="",
+                url="https://example.com/tmpl-1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding", "watchlist"],
+                importance=12.0,
+            ),
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        # With no body/summary, falls back to template
+        self.assertTrue(
+            "Релиз сфокусирован" in cards[0]
+            or "заметный апдейт" in cards[0],
+            f"Expected template fallback, got: {cards[0]!r}",
+        )
+
+    def test_extract_key_sentence_picks_informative_sentence(self) -> None:
+        from digest_bot.pipeline.digest_builder import _extract_key_sentence
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:test",
+            external_id="ks-1",
+            title="OpenAI launches GPT-5",
+            summary="New model release.",
+            body=(
+                "OpenAI launched GPT-5 today. "
+                "The model achieves 92% on HumanEval and supports 200k token context. "
+                "It is available via API."
+            ),
+            url="https://example.com/ks-1",
+            published_at=now,
+            collected_at=now,
+            categories=["models", "release"],
+            importance=10.0,
+        )
+        sentence = _extract_key_sentence(item)
+        self.assertIsNotNone(sentence)
+        # Should prefer the sentence with numbers/stats
+        self.assertIn("92%", sentence)
+
+    def test_extract_key_sentence_returns_none_for_short_body(self) -> None:
+        from digest_bot.pipeline.digest_builder import _extract_key_sentence
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:test",
+            external_id="ks-2",
+            title="Short news",
+            summary="Brief.",
+            body="Too short.",
+            url="https://example.com/ks-2",
+            published_at=now,
+            collected_at=now,
+        )
+        sentence = _extract_key_sentence(item)
+        self.assertIsNone(sentence)
 
     def test_gather_images_prefers_one_cover_per_item_before_extras(self) -> None:
         now = datetime.now(UTC)
@@ -462,6 +529,138 @@ class PipelineTestCase(unittest.TestCase):
         ]
         matched = match_story_items_to_paragraphs(paragraphs, items)
         self.assertEqual([item.db_id if item else None for item in matched], [1, 2])
+
+
+    def test_truncate_at_word_boundary_does_not_cut_mid_word(self) -> None:
+        from digest_bot.pipeline.digest_builder import truncate_at_word_boundary
+        result = truncate_at_word_boundary("Anthropic выпустила Claude Sonnet 4.6", 25)
+        self.assertIn("…", result)
+        # Must not end with a partial word
+        before_suffix = result.removesuffix("…")
+        self.assertTrue(
+            before_suffix.endswith(" ") or before_suffix == "" or not before_suffix[-1].isalpha()
+            or before_suffix.split()[-1] in "Anthropic выпустила Claude Sonnet 4.6".split(),
+            f"Truncated text ends mid-word: {result!r}",
+        )
+
+    def test_truncate_at_word_boundary_short_text_unchanged(self) -> None:
+        from digest_bot.pipeline.digest_builder import truncate_at_word_boundary
+        text = "Short text"
+        self.assertEqual(truncate_at_word_boundary(text, 100), text)
+
+    def test_truncate_at_word_boundary_respects_limit(self) -> None:
+        from digest_bot.pipeline.digest_builder import truncate_at_word_boundary
+        result = truncate_at_word_boundary("A " * 100, 20)
+        self.assertLessEqual(len(result), 20)
+
+    def test_match_story_items_returns_none_for_unmatched_paragraph(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                db_id=1,
+                source_key="rss:a",
+                external_id="a",
+                title="Anthropic ships Claude",
+                summary="Claude update",
+                body="",
+                url="https://example.com/a",
+                published_at=now,
+                collected_at=now,
+                categories=["models"],
+                importance=10.0,
+            ),
+        ]
+        paragraphs = [
+            "🚀 CLAUDE: Anthropic выпустила Claude.",
+            "🔧 Совершенно другая тема про квантовые вычисления и физику.",
+        ]
+        matched = match_story_items_to_paragraphs(paragraphs, items)
+        self.assertEqual(matched[0].db_id, 1)
+        self.assertIsNone(matched[1])
+
+    def test_localized_title_uses_model_name_in_generic_fallback(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:test",
+            external_id="model-gen",
+            title="Introducing GPT-5.2 preview",
+            summary="A new model for coding and reasoning.",
+            body="",
+            url="https://example.com/gpt5",
+            published_at=now,
+            collected_at=now,
+            categories=["models", "release"],
+            importance=10.0,
+        )
+        from digest_bot.pipeline.digest_builder import _localized_title
+        title = _localized_title(item)
+        # Should not be the generic "Вышел новый релиз AI-модели" — should contain GPT
+        self.assertNotEqual(title, "Вышел новый релиз AI-модели")
+
+    def test_extract_subject_from_body_when_title_has_no_subject(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:test",
+            external_id="body-sub",
+            title="New coding agent released",
+            summary="A new agent for code.",
+            body="OpenAI released a new coding agent for repository editing.",
+            url="https://example.com/body-sub",
+            published_at=now,
+            collected_at=now,
+            categories=["coding", "dev_tools"],
+            importance=8.0,
+        )
+        from digest_bot.pipeline.digest_builder import _extract_subject
+        subject = _extract_subject(item)
+        self.assertEqual(subject, "OpenAI")
+
+
+class SentenceCaseTestCase(unittest.TestCase):
+    def test_sentence_case_normalizes_title_case(self) -> None:
+        from digest_bot.service import DigestService
+        # Access _smart_sentence_case via instance (it's a method)
+        # We can test the logic directly
+        service_cls = DigestService
+        # Create a minimal mock-like test
+        result = service_cls._smart_sentence_case(None, "ANTHROPIC ВЫПУСТИЛА НОВУЮ МОДЕЛЬ ДЛЯ CODING")
+        self.assertTrue(result[0].isupper())
+        # Second word should be lowercase (not a proper noun in this context)
+        words = result.split()
+        self.assertEqual(words[0], "Anthropic")
+        self.assertEqual(words[1], "выпустила")
+
+    def test_sentence_case_preserves_proper_names(self) -> None:
+        from digest_bot.service import DigestService
+        result = DigestService._smart_sentence_case(None, "OPENAI ОБНОВИЛА CHATGPT И ДОБАВИЛА API")
+        self.assertIn("OpenAI", result)
+        self.assertIn("ChatGPT", result)
+        self.assertIn("API", result)
+
+    def test_sentence_case_preserves_acronyms(self) -> None:
+        from digest_bot.service import DigestService
+        result = DigestService._smart_sentence_case(None, "НОВЫЙ SDK ДЛЯ AI МОДЕЛЕЙ")
+        self.assertIn("SDK", result)
+        self.assertIn("AI", result)
+
+
+class DigestHtmlFormattingTestCase(unittest.TestCase):
+    def test_safe_join_chunks_respects_limit(self) -> None:
+        from digest_bot.service import _safe_join_chunks
+        chunks = ["Title"] + [f"Paragraph {i}" * 50 for i in range(20)]
+        result = _safe_join_chunks(chunks, limit=200)
+        self.assertLessEqual(len(result), 200)
+        self.assertTrue(result.startswith("Title"))
+
+    def test_format_digest_html_contains_separator(self) -> None:
+        from digest_bot.service import DigestService
+        # Test that the formatted HTML contains visual separators
+        service = DigestService.__new__(DigestService)
+        text = "🚀 Claude Sonnet 4.6: Новая модель.\n\n🧰 Cursor: Новый агент."
+        payload = {"summary_payload": {"story_links": ["https://example.com/1", "https://example.com/2"]}}
+        result = service._format_digest_html("Утренний digest", text, "morning", payload)
+        self.assertIn("─", result)
+        self.assertIn("Читать →", result)
 
 
 if __name__ == "__main__":

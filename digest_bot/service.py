@@ -27,6 +27,7 @@ from digest_bot.pipeline.digest_builder import (
     compute_window_with_hours,
     gather_images,
     select_sections,
+    truncate_at_word_boundary,
 )
 from digest_bot.storage import Repository
 from digest_bot.summarizers.fallback import FallbackSummarizer
@@ -175,7 +176,7 @@ class DigestService:
             await self._send_images(chat_id, images)
         await self.bot.send_message(
             chat_id=chat_id,
-            text=section["paragraph"][:4000],
+            text=truncate_at_word_boundary(section["paragraph"], 4000),
             reply_markup=links_keyboard(section.get("links", []), "Открыть"),
         )
 
@@ -195,7 +196,7 @@ class DigestService:
         for section in payload.get("sections", {}).values():
             lines.append(section["paragraph"])
             lines.append("")
-        return "\n".join(lines).strip()[:4000]
+        return truncate_at_word_boundary("\n".join(lines).strip(), 4000)
 
     def render_digest_section(self, digest_id: int, section_key: str) -> str:
         row = self.repo.get_digest(digest_id)
@@ -205,7 +206,7 @@ class DigestService:
         section = payload.get("sections", {}).get(section_key)
         if section is None:
             return "Для этого окна раздел пуст."
-        return section["paragraph"][:4000]
+        return truncate_at_word_boundary(section["paragraph"], 4000)
 
     def get_digest_links(self, digest_id: int, link_kind: str) -> tuple[str, list[str]]:
         row = self.repo.get_digest(digest_id)
@@ -260,7 +261,7 @@ class DigestService:
         ]
         for source in sources[:40]:
             lines.append(f"• {source.name} [{source.kind}]")
-        return "\n".join(lines)[:4000]
+        return truncate_at_word_boundary("\n".join(lines), 4000)
 
     def render_settings(self) -> str:
         return (
@@ -371,7 +372,10 @@ class DigestService:
                 model=self.settings.openrouter_model or "stepfun/step-3.5-flash:free",
                 base_url="https://openrouter.ai/api/v1",
                 fallback_models=self.settings.llm_fallback_models
-                or ["openrouter/free", "arcee-ai/trinity-large-preview:free"],
+                or [
+                    "z-ai/glm-4.5-air:free",
+                    "nvidia/nemotron-nano-9b-v2:free",
+                ],
                 referer="https://openrouter.ai",
                 title="AI News Digest Bot",
             )
@@ -421,12 +425,17 @@ class DigestService:
             elif not body:
                 block = f"<b>{escape(label)}</b>"
             else:
-                block = f"<b>{escape(label)}</b>\n\n{escape(body)}"
+                block = f"<b>{escape(label)}</b>\n{escape(body)}"
             link = story_links[index] if index < len(story_links) else None
             if link:
-                block = f"{block}\n\n<a href=\"{escape(link)}\">Пост</a>"
+                block = f"{block}\n<a href=\"{escape(link)}\">Читать →</a>"
             chunks.append(block)
-        return "\n\n".join(chunks)[:4000]
+        separator = "\n\n" + "─" * 20 + "\n\n"
+        header = chunks[0]
+        stories = chunks[1:]
+        if stories:
+            return _safe_join_chunks([header, separator.join(stories)], limit=4000)
+        return header
 
     def _story_image_caption(self, title: str, url: str) -> str:
         if url:
@@ -470,7 +479,7 @@ class DigestService:
             and self._looks_like_caps(label)
             and not self._looks_like_model_release(f"{label} {body}")
         ):
-            clean_label = self._smart_title_case(label)
+            clean_label = self._smart_sentence_case(label)
         if self._looks_like_model_release(f"{clean_label} {body}"):
             clean_label = clean_label.upper()
         if self._looks_like_free_offer(f"{clean_label} {body}") and "АБСОЛЮТНО БЕСПЛАТНО" not in clean_label:
@@ -544,10 +553,17 @@ class DigestService:
         )
         return any(cue in haystack for cue in free_cues)
 
-    def _smart_title_case(self, text: str) -> str:
+    def _smart_sentence_case(self, text: str) -> str:
         acronyms = {"AI", "API", "CLI", "GPU", "IDE", "LLM", "ML", "RL", "SDK", "SOTA", "SWE"}
+        proper_names = {name.lower(): name for name in (
+            "OpenAI", "ChatGPT", "Anthropic", "Claude", "Google", "Gemini",
+            "DeepMind", "Cursor", "Windsurf", "Copilot", "GitHub", "Codex",
+            "Grok", "xAI", "Meta", "Llama", "Qwen", "Mistral", "DeepSeek",
+            "Aider", "Replit", "Mozilla", "Alibaba", "OpenHands", "GPT",
+            "SWE-Bench", "Together", "Firefox", "Telegram", "YouTube",
+        )}
         normalized: list[str] = []
-        for raw_word in text.split():
+        for idx, raw_word in enumerate(text.split()):
             prefix = ""
             suffix = ""
             word = raw_word
@@ -557,15 +573,30 @@ class DigestService:
             while word and not word[-1].isalnum():
                 suffix = word[-1] + suffix
                 word = word[:-1]
-            upper_word = word.upper()
             if not word:
                 normalized.append(raw_word)
-            elif upper_word in acronyms:
+                continue
+            upper_word = word.upper()
+            lower_word = word.lower()
+            if upper_word in acronyms:
                 normalized.append(f"{prefix}{upper_word}{suffix}")
+            elif lower_word in proper_names:
+                normalized.append(f"{prefix}{proper_names[lower_word]}{suffix}")
+            elif idx == 0:
+                normalized.append(f"{prefix}{lower_word.capitalize()}{suffix}")
             else:
-                lowered = word.lower()
-                normalized.append(f"{prefix}{lowered.capitalize()}{suffix}")
+                normalized.append(f"{prefix}{lower_word}{suffix}")
         return " ".join(normalized)
+
+
+def _safe_join_chunks(chunks: list[str], limit: int, separator: str = "\n\n") -> str:
+    result = ""
+    for chunk in chunks:
+        candidate = f"{result}{separator}{chunk}" if result else chunk
+        if len(candidate) > limit:
+            break
+        result = candidate
+    return result or chunks[0][:limit] if chunks else ""
 
 
 def _load_sources(settings: Settings) -> list[Source]:

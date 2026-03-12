@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           : "${OPENROUTER_MODEL:=stepfun/step-3.5-flash:free}"
-          : "${LLM_FALLBACK_MODELS:=openrouter/free,arcee-ai/trinity-large-preview:free}"
+          : "${LLM_FALLBACK_MODELS:=z-ai/glm-4.5-air:free,nvidia/nemotron-nano-9b-v2:free}"
           : "${TIMEZONE:=Europe/Moscow}"
           : "${MORNING_HOUR:=9}"
           : "${EVENING_HOUR:=19}"

@@ -26,8 +26,14 @@ class DigestScheduler:
             id="evening-digest",
             replace_existing=True,
         )
+        self._scheduler.add_job(
+            self._service.run_scheduled_digest,
+            CronTrigger(day_of_week="sun", hour=self._service.settings.morning_hour, minute=30),
+            kwargs={"slot": "weekly"},
+            id="weekly-digest",
+            replace_existing=True,
+        )
         self._scheduler.start()
 
     async def shutdown(self) -> None:
         self._scheduler.shutdown(wait=False)
-

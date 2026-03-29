@@ -37,6 +37,8 @@ class Settings:
     openai_model: str = "gpt-4.1-mini"
     openrouter_api_key: str | None = None
     openrouter_model: str = "stepfun/step-3.5-flash:free"
+    quiet_start: int = 23
+    quiet_end: int = 7
 
 
 def project_root() -> Path:
@@ -90,6 +92,8 @@ def load_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"),
+        quiet_start=int(os.getenv("QUIET_START", "23")),
+        quiet_end=int(os.getenv("QUIET_END", "7")),
     )
 
 

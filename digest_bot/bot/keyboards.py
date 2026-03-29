@@ -14,26 +14,11 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="Дайджест сейчас"),
+                KeyboardButton(text="Свежий дайджест"),
                 KeyboardButton(text="За сегодня"),
-                KeyboardButton(text="Главное"),
             ],
             [
-                KeyboardButton(text="Модели"),
-                KeyboardButton(text="Coding"),
-                KeyboardButton(text="Watchlist"),
-            ],
-            [
-                KeyboardButton(text="Dev tools"),
-                KeyboardButton(text="Vibe coding"),
-                KeyboardButton(text="Бесплатно"),
-            ],
-            [
-                KeyboardButton(text="Сравнения"),
-                KeyboardButton(text="За месяц"),
                 KeyboardButton(text="Источники"),
-            ],
-            [
                 KeyboardButton(text="Настройки"),
             ],
         ],
@@ -43,14 +28,21 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def digest_inline_keyboard(digest_id: int, payload: dict) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="Дайджест сейчас", callback_data="dg:refresh:now")]]
+    rows = [
+        [
+            InlineKeyboardButton(text="👍", callback_data=f"dg:rate:{digest_id}:up"),
+            InlineKeyboardButton(text="👎", callback_data=f"dg:rate:{digest_id}:down"),
+            InlineKeyboardButton(text="🧒 Проще", callback_data=f"dg:simplify:{digest_id}"),
+        ],
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="dg:refresh:now")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def digest_static_keyboard(payload: dict, manual_digest_url: str | None = None) -> InlineKeyboardMarkup | None:
     if not manual_digest_url:
         return None
-    rows = [[InlineKeyboardButton(text="Дайджест сейчас", url=manual_digest_url)]]
+    rows = [[InlineKeyboardButton(text="Получить дайджест здесь и сейчас", url=manual_digest_url)]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -292,3 +292,123 @@ sources:
     location: "https://simonwillison.net/atom/everything/"
     priority: 5
     tags: ["coding", "agents", "analysis"]
+
+  # --- News sites ---
+
+  - key: rss:techcrunch-ai
+    name: "TechCrunch AI"
+    kind: rss
+    location: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    priority: 4
+    tags: ["news", "ai", "startups"]
+
+  - key: rss:theverge-ai
+    name: "The Verge AI"
+    kind: rss
+    location: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"
+    priority: 4
+    tags: ["news", "ai", "products"]
+
+  - key: rss:arstechnica-ai
+    name: "Ars Technica AI"
+    kind: rss
+    location: "https://feeds.arstechnica.com/arstechnica/technology-lab"
+    priority: 3
+    tags: ["news", "ai", "tech"]
+
+  - key: rss:thenewstack
+    name: "The New Stack AI"
+    kind: rss
+    location: "https://thenewstack.io/blog/feed/"
+    priority: 3
+    tags: ["news", "coding", "dev_tools"]
+
+  # --- Official blogs (missing) ---
+
+  - key: rss:microsoft-ai-blog
+    name: "Microsoft AI Blog"
+    kind: rss
+    location: "https://blogs.microsoft.com/ai/feed/"
+    priority: 5
+    tags: ["official", "microsoft", "models"]
+
+  - key: rss:nvidia-ai-blog
+    name: "NVIDIA AI Blog"
+    kind: rss
+    location: "https://blogs.nvidia.com/feed/"
+    priority: 4
+    tags: ["official", "nvidia", "gpu", "models"]
+
+  - key: rss:aws-ai-blog
+    name: "AWS Machine Learning Blog"
+    kind: rss
+    location: "https://aws.amazon.com/blogs/machine-learning/feed/"
+    priority: 3
+    tags: ["official", "aws", "infra"]
+
+  - key: webpage:stability-blog
+    name: "Stability AI Blog"
+    kind: webpage
+    location: "https://stability.ai/news"
+    priority: 5
+    tags: ["official", "stability", "models", "open_source"]
+    config:
+      listing_url: "https://stability.ai/news"
+      include_patterns: ["/news/"]
+
+  - key: webpage:replit-blog
+    name: "Replit Blog"
+    kind: webpage
+    location: "https://blog.replit.com"
+    priority: 5
+    tags: ["coding", "vibe_coding", "ide"]
+    config:
+      listing_url: "https://blog.replit.com"
+      include_patterns: ["/"]
+
+  - key: webpage:deepseek-blog
+    name: "DeepSeek Blog"
+    kind: webpage
+    location: "https://api-docs.deepseek.com/news"
+    priority: 6
+    tags: ["official", "deepseek", "models"]
+    config:
+      listing_url: "https://api-docs.deepseek.com/news"
+      include_patterns: ["/news"]
+
+  # --- GitHub releases (dev tools) ---
+
+  - key: rss:langchain-releases
+    name: "LangChain Releases"
+    kind: rss
+    location: "https://github.com/langchain-ai/langchain/releases.atom"
+    priority: 4
+    tags: ["coding", "agents", "github_release"]
+
+  - key: rss:llamaindex-releases
+    name: "LlamaIndex Releases"
+    kind: rss
+    location: "https://github.com/run-llama/llama_index/releases.atom"
+    priority: 4
+    tags: ["coding", "agents", "github_release"]
+
+  - key: rss:crewai-releases
+    name: "CrewAI Releases"
+    kind: rss
+    location: "https://github.com/crewAIInc/crewAI/releases.atom"
+    priority: 4
+    tags: ["coding", "agents", "github_release"]
+
+  - key: rss:ollama-releases
+    name: "Ollama Releases"
+    kind: rss
+    location: "https://github.com/ollama/ollama/releases.atom"
+    priority: 5
+    tags: ["models", "open_source", "github_release"]
+
+  - key: rss:claude-code-releases
+    name: "Claude Code Releases"
+    kind: rss
+    location: "https://github.com/anthropics/claude-code/releases.atom"
+    priority: 6
+    tags: ["coding", "anthropic", "github_release"]

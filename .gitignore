@@ -1,4 +1,5 @@
 .env
+.env.amvera
 .venv/
 __pycache__/
 .pytest_cache/
@@ -8,6 +9,18 @@ __pycache__/
 *.session
 *.session-journal
 .DS_Store
+build/
+bot_log.txt
+qr_*.txt
+session_string.txt
+telegram_qr.png
+start_bot.sh
+wait_and_start.sh
+code_login.py
+get_session.py
+get_string.py
+qr_login.py
+test.py
 data/digest.db
 data/media/*
 !data/media/.gitkeep

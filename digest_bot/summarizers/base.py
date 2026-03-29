@@ -12,6 +12,6 @@ class Summarizer(ABC):
         slot: str,
         sectioned_items: dict[str, list[NewsItem]],
         paragraph_count: int,
+        complexity_level: int = 1,
     ) -> str:
         raise NotImplementedError
-

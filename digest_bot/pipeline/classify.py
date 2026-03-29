@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 
 from digest_bot.models import NewsItem
@@ -180,23 +181,15 @@ SIGNAL_PATTERNS = (
 AI_RELEVANCE_PATTERNS = (
     "artificial intelligence",
     "generative ai",
+    "machine learning",
     "llm",
     "foundation model",
-    "model",
-    "models",
     "weights",
     "checkpoint",
     "inference",
     "reasoning",
     "multimodal",
-    "agent",
-    "agents",
     "coding agent",
-    "developer tool",
-    "dev tool",
-    "ide",
-    "sdk",
-    "api",
     "openai",
     "chatgpt",
     "anthropic",
@@ -222,18 +215,18 @@ AI_RELEVANCE_PATTERNS = (
 )
 
 
-def classify_items(items: list[NewsItem]) -> list[NewsItem]:
+def classify_items(items: list[NewsItem], *, reset: bool = False) -> list[NewsItem]:
     for item in items:
-        categories = set(item.categories)
+        categories = set() if reset else set(item.categories)
         haystack = item_haystack(item)
         for category, keywords in KEYWORDS.items():
-            if any(keyword in haystack for keyword in keywords):
+            if _contains_any_keyword(haystack, keywords):
                 categories.add(category)
         if any(tag in item.tags for tag in ("official", "github_release", "sdk")):
             categories.add("release")
         if not categories:
             categories.add("general")
-        if "coding" in categories and "vibe_coding" not in categories and "cursor" in haystack:
+        if "coding" in categories and "vibe_coding" not in categories and _contains_keyword(haystack, "cursor"):
             categories.add("vibe_coding")
         if is_noise_item(item, haystack=haystack, categories=categories):
             categories.add("noise")
@@ -307,7 +300,7 @@ def is_noise_item(
 def is_free_offer_item(item: NewsItem, haystack: str | None = None) -> bool:
     value = haystack or item_haystack(item)
     return any(
-        keyword in value
+        _contains_keyword(value, keyword)
         for keyword in ("free", "free tier", "free plan", "free forever", "no cost", "бесплатно")
     )
 
@@ -317,7 +310,9 @@ def is_relevant_item(item: NewsItem, haystack: str | None = None) -> bool:
     categories = set(item.categories)
     tags = set(item.tags)
     core_categories = {"models", "release", "comparisons", "coding", "vibe_coding", "dev_tools", "watchlist"}
-    if categories & core_categories:
+    if "watchlist" in categories and _has_ai_relevance(value):
+        return True
+    if categories & core_categories and _has_ai_relevance(value):
         return True
     if "resources" in categories and _has_ai_relevance(value):
         return True
@@ -327,7 +322,27 @@ def is_relevant_item(item: NewsItem, haystack: str | None = None) -> bool:
 
 
 def _normalize(value: str) -> str:
-    return value.lower().replace("-", " ")
+    normalized = value.lower().replace("-", " ").replace("_", " ")
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+@lru_cache(maxsize=None)
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    normalized = _normalize(keyword)
+    parts = [re.escape(part) for part in normalized.split() if part]
+    inner = r"\s+".join(parts)
+    return re.compile(rf"(?<![a-zа-яё0-9]){inner}(?![a-zа-яё0-9])", re.IGNORECASE)
+
+
+def _contains_keyword(haystack: str, keyword: str) -> bool:
+    normalized = _normalize(keyword)
+    if not normalized:
+        return False
+    return bool(_keyword_pattern(normalized).search(haystack))
+
+
+def _contains_any_keyword(haystack: str, keywords: tuple[str, ...]) -> bool:
+    return any(_contains_keyword(haystack, keyword) for keyword in keywords)
 
 
 def _looks_like_versioned_release(haystack: str) -> bool:
@@ -341,4 +356,4 @@ def _looks_like_listicle(title: str) -> bool:
 def _has_ai_relevance(haystack: str) -> bool:
     if re.search(r"\bai\b", haystack):
         return True
-    return any(pattern in haystack for pattern in AI_RELEVANCE_PATTERNS)
+    return any(_contains_keyword(haystack, pattern) for pattern in AI_RELEVANCE_PATTERNS)

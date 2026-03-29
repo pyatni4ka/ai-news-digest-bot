@@ -60,6 +60,52 @@ class PipelineTestCase(unittest.TestCase):
         deduped = deduplicate(items)
         self.assertEqual(len(deduped), 1)
 
+    def test_classify_does_not_match_substrings_inside_unrelated_words(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="tg:test",
+                external_id="video-1",
+                title="Sora’s shutdown could be a reality check moment for AI video",
+                summary="This is about AI video and market strategy.",
+                body="A market story about AI video and product positioning.",
+                published_at=now,
+                collected_at=now,
+                tags=["news", "ai"],
+            ),
+            NewsItem(
+                source_key="tg:test",
+                external_id="raiders-1",
+                title="Streamer drama in ARC Raiders",
+                summary="A gaming story that should stay outside the digest.",
+                body="Pure gaming drama around a match and a streamer conflict.",
+                published_at=now,
+                collected_at=now,
+                tags=["telegram", "tech"],
+            ),
+        ]
+        classify_items(items)
+        for item in items:
+            self.assertNotIn("coding", item.categories)
+            self.assertNotIn("dev_tools", item.categories)
+            self.assertNotIn("watchlist", item.categories)
+
+    def test_classify_reset_rebuilds_categories_from_scratch(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="tg:test",
+            external_id="reset-1",
+            title="Streamer drama in ARC Raiders",
+            summary="Gaming story only.",
+            body="Pure gaming story with no engineering angle.",
+            published_at=now,
+            collected_at=now,
+            tags=["telegram", "tech"],
+            categories=["coding", "dev_tools", "watchlist"],
+        )
+        classify_items([item], reset=True)
+        self.assertEqual(item.categories, ["general"])
+
     def test_monthly_sections_and_fallback(self) -> None:
         now = datetime.now(UTC)
         items = []
@@ -69,8 +115,8 @@ class PipelineTestCase(unittest.TestCase):
                     source_key="rss:test",
                     external_id=str(idx),
                     title=f"New coding model {idx}",
-                    summary="Major update for coding agents and repo editing.",
-                    body="Major update for coding agents and repo editing with longer context.",
+                    summary="Major AI update for coding agents and repo editing.",
+                    body="Major AI update for coding agents and repo editing with longer context.",
                     url=f"https://example.com/{idx}",
                     published_at=now,
                     collected_at=now,
@@ -83,7 +129,7 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEqual(len(sections["coding"]), 8)
         paragraphs = fallback_digest_paragraphs("monthly", sections)
         self.assertTrue(paragraphs[0].startswith("🚀"))
-        self.assertIn(":", paragraphs[0])
+        self.assertIn("\n", paragraphs[0])
         self.assertIn("РЕЛИЗ AI-МОДЕЛИ", paragraphs[0])
         self.assertGreaterEqual(len(paragraphs), 6)
 
@@ -295,8 +341,10 @@ class PipelineTestCase(unittest.TestCase):
         cards = build_story_cards("manual", sections, 6)
         self.assertTrue(cards)
         self.assertIn("выпустила", cards[0].lower())
-        # Body sentence is extracted instead of a template phrase
-        self.assertIn("Claude Sonnet 4.6", cards[0])
+        # Model name is in the title (uppercased for model release)
+        self.assertIn("CLAUDE SONNET 4.6", cards[0])
+        # English body is NOT leaked — Russian template is used instead
+        self.assertNotIn("released", cards[0].lower())
 
     def test_fallback_uses_template_when_body_is_empty(self) -> None:
         now = datetime.now(UTC)
@@ -578,6 +626,60 @@ class PipelineTestCase(unittest.TestCase):
         self.assertEqual(matched[0].db_id, 1)
         self.assertIsNone(matched[1])
 
+    def test_keyword_matching_uses_word_boundaries(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="telegram:@pekagame",
+            external_id="raiders-1",
+            title="Стримерша накатала на чела заяву в полицию после матча в ARC Raiders",
+            summary="История про конфликт игроков и разборки после матча.",
+            body="История целиком про игровой матч, конфликт игроков и разборки после стрима.",
+            url="https://example.com/raiders-1",
+            published_at=now,
+            collected_at=now,
+            tags=["telegram", "gaming"],
+        )
+        classify_items([item], reset=True)
+        self.assertNotIn("coding", item.categories)
+        self.assertNotIn("dev_tools", item.categories)
+        self.assertNotIn("watchlist", item.categories)
+
+    def test_non_ai_component_model_article_is_filtered(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:webassembly",
+            external_id="wasm-1",
+            title="WebAssembly component model matures at the edge",
+            summary="The article explains how the component model improves portability for edge apps.",
+            body="This is about WebAssembly components, portability, runtimes and APIs for edge systems.",
+            url="https://example.com/wasm-1",
+            published_at=now,
+            collected_at=now,
+            tags=["news", "webassembly"],
+        )
+        classify_items([item], reset=True)
+        sections = select_sections([item], slot="manual")
+        self.assertEqual(sections["headline"], [])
+
+    def test_match_story_items_requires_meaningful_similarity(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            db_id=11,
+            source_key="rss:model",
+            external_id="model-11",
+            title="OpenAI launches GPT-5",
+            summary="New flagship model for coding and reasoning.",
+            body="",
+            url="https://example.com/gpt-5",
+            published_at=now,
+            collected_at=now,
+            categories=["models", "release", "watchlist"],
+            importance=12.0,
+        )
+        paragraphs = ["🚀 Вышел новый релиз AI-модели\nКороткий пересказ без названия компании и модели."]
+        matched = match_story_items_to_paragraphs(paragraphs, [item])
+        self.assertEqual(matched, [None])
+
     def test_localized_title_uses_model_name_in_generic_fallback(self) -> None:
         now = datetime.now(UTC)
         item = NewsItem(
@@ -652,15 +754,15 @@ class DigestHtmlFormattingTestCase(unittest.TestCase):
         self.assertLessEqual(len(result), 200)
         self.assertTrue(result.startswith("Title"))
 
-    def test_format_digest_html_contains_separator(self) -> None:
+    def test_format_digest_html_has_links_and_counter(self) -> None:
         from digest_bot.service import DigestService
-        # Test that the formatted HTML contains visual separators
         service = DigestService.__new__(DigestService)
-        text = "🚀 Claude Sonnet 4.6: Новая модель.\n\n🧰 Cursor: Новый агент."
+        text = "🚀 Claude Sonnet 4.6\nНовая модель.\n\n🧰 Cursor\nНовый агент."
         payload = {"summary_payload": {"story_links": ["https://example.com/1", "https://example.com/2"]}}
         result = service._format_digest_html("Утренний digest", text, "morning", payload)
-        self.assertIn("─", result)
+        self.assertNotIn("───", result)  # no separator between stories
         self.assertIn("Читать →", result)
+        self.assertIn("2 новости в выпуске", result)
 
 
 if __name__ == "__main__":

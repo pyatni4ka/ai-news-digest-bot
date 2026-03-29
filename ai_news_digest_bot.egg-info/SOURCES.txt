@@ -6,10 +6,13 @@ ai_news_digest_bot.egg-info/dependency_links.txt
 ai_news_digest_bot.egg-info/entry_points.txt
 ai_news_digest_bot.egg-info/requires.txt
 ai_news_digest_bot.egg-info/top_level.txt
+ai_news_digest_bot.egg-info/.claude/settings.local.json
 digest_bot/__init__.py
 digest_bot/__main__.py
 digest_bot/cli.py
 digest_bot/config.py
+digest_bot/glossary.py
+digest_bot/image_selection.py
 digest_bot/models.py
 digest_bot/scheduler.py
 digest_bot/service.py
@@ -29,5 +32,9 @@ digest_bot/pipeline/digest_builder.py
 digest_bot/summarizers/__init__.py
 digest_bot/summarizers/base.py
 digest_bot/summarizers/fallback.py
+digest_bot/summarizers/http_compat.py
 digest_bot/summarizers/openai.py
+tests/test_bot_ui.py
+tests/test_collectors.py
 tests/test_pipeline.py
+tests/test_storage.py

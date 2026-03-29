@@ -95,7 +95,34 @@ GENERIC_SUBJECTS = {
     "introducing",
     "announcing",
     "breaking",
+    "beyond",
+    "towards",
+    "exploring",
+    "understanding",
+    "how",
+    "why",
+    "what",
+    "the",
+    "a",
+    "an",
+    "on",
+    "in",
+    "for",
+    "with",
+    "from",
+    "about",
+    "using",
+    "building",
+    "training",
+    "scaling",
+    "rethinking",
+    "toward",
+    "several",
+    "here",
+    "some",
 }
+
+MIN_PARAGRAPH_MATCH_SCORE = 40
 
 
 def compute_window(slot: str, now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -124,6 +151,9 @@ def compute_window_with_hours(
     elif slot == "monthly":
         end_local = local_now
         start_local = end_local - timedelta(days=30)
+    elif slot == "weekly":
+        end_local = local_now
+        start_local = end_local - timedelta(days=7)
     elif slot == "today":
         end_local = local_now
         start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -159,7 +189,11 @@ def build_digest(
     paragraphs = split_paragraphs(summary_text, paragraph_count)
     if not paragraphs:
         paragraphs = fallback_digest_paragraphs(slot, sections)
-    matched_story_items = match_story_items_to_paragraphs(paragraphs, story_items)
+    matched_story_items, match_scores = match_story_items_with_scores(paragraphs, story_items)
+    if _should_fallback_to_story_cards(paragraphs, matched_story_items, match_scores):
+        paragraphs = fallback_digest_paragraphs(slot, sections)
+        matched_story_items = story_items[: len(paragraphs)]
+        match_scores = [MIN_PARAGRAPH_MATCH_SCORE] * len(matched_story_items)
     story_media = build_story_media_for_items(matched_story_items, max_items=4 if slot != "monthly" else 6)
 
     section_map = {
@@ -187,7 +221,10 @@ def build_digest(
             "resource_links": resource_links,
             "model_links": model_links,
             "dev_tool_links": dev_tool_links,
-            "story_links": [item.url if item else None for item in matched_story_items[: len(paragraphs)]],
+            "story_links": [
+                item.url if item and index < len(match_scores) and match_scores[index] >= MIN_PARAGRAPH_MATCH_SCORE else None
+                for index, item in enumerate(matched_story_items[: len(paragraphs)])
+            ],
             "generated_at": now.isoformat(),
         },
         buttons=buttons,
@@ -275,11 +312,14 @@ def build_title(slot: str, start_at: datetime, end_at: datetime, timezone_name: 
         if slot == "evening"
         else "Месячный"
         if slot == "monthly"
+        else "Недельный"
+        if slot == "weekly"
         else "За сегодня"
         if slot == "today"
         else "Оперативный"
     )
-    return f"{label} AI digest • {local_end:%d.%m %H:%M}"
+    tz_abbr = "MSK" if "Moscow" in timezone_name else str(tz)
+    return f"{label} AI digest • {local_end:%d.%m %H:%M} {tz_abbr}"
 
 
 def title_for_section(key: str) -> str:
@@ -300,7 +340,7 @@ def fallback_section_details(title: str, items: list[NewsItem]) -> str:
     lines = [title]
     for item in items[:6]:
         lines.append("")
-        lines.append(_story_card(item, limit=220))
+        lines.append(_story_card(item, limit=500))
     return "\n".join(lines)
 
 
@@ -400,8 +440,17 @@ def match_story_items_to_paragraphs(
     paragraphs: list[str],
     candidates: list[NewsItem],
 ) -> list[NewsItem | None]:
+    matched, _ = match_story_items_with_scores(paragraphs, candidates)
+    return matched
+
+
+def match_story_items_with_scores(
+    paragraphs: list[str],
+    candidates: list[NewsItem],
+) -> tuple[list[NewsItem | None], list[int]]:
     available = list(candidates)
     matched: list[NewsItem | None] = []
+    scores: list[int] = []
     for paragraph in paragraphs:
         best_index = -1
         best_score = -1
@@ -410,23 +459,39 @@ def match_story_items_to_paragraphs(
             if score > best_score:
                 best_score = score
                 best_index = index
-        if best_index >= 0 and best_score > 0:
+        if best_index >= 0 and best_score >= MIN_PARAGRAPH_MATCH_SCORE:
             matched.append(available.pop(best_index))
+            scores.append(best_score)
         else:
             matched.append(None)
-    return matched
+            scores.append(0)
+    return matched, scores
 
 
-def _story_card(item: NewsItem, limit: int = 200) -> str:
+def _should_fallback_to_story_cards(
+    paragraphs: list[str],
+    matched_story_items: list[NewsItem | None],
+    match_scores: list[int],
+) -> bool:
+    if not paragraphs:
+        return True
+    strong_matches = sum(
+        1
+        for item, score in zip(matched_story_items, match_scores, strict=False)
+        if item is not None and score >= MIN_PARAGRAPH_MATCH_SCORE
+    )
+    required_matches = max(2, int(len(paragraphs) * 0.7))
+    return strong_matches < required_matches
+
+
+def _story_card(item: NewsItem, limit: int = 500) -> str:
     title = _display_title(item)
     fragment = _localized_fragment(item, limit=limit)
-    return f"{_emoji_for_item(item)} {title}: {fragment}"
+    return f"{_emoji_for_item(item)} {title}\n{fragment}"
 
 
 def _display_title(item: NewsItem) -> str:
     title = _localized_title(item)
-    if len(title) > 78:
-        title = truncate_at_word_boundary(title, 75)
     if _is_totally_free(item):
         title = f"{title} — АБСОЛЮТНО БЕСПЛАТНО"
     if _is_model_release(item):
@@ -468,7 +533,18 @@ def truncate_at_word_boundary(text: str, limit: int, suffix: str = "…") -> str
 
 def _compact_fragment(value: str, limit: int) -> str:
     text = " ".join(value.split())
-    return truncate_at_word_boundary(text, limit)
+    if len(text) <= limit:
+        return text
+    # Cut at the last sentence boundary — never mid-word with ellipsis
+    for end_char in (".", "!", "?"):
+        pos = text.rfind(end_char, 0, limit)
+        if pos > limit * 0.3:
+            return text[: pos + 1]
+    # If no sentence boundary found, use full text up to limit at word boundary without ellipsis
+    space_pos = text.rfind(" ", 0, limit)
+    if space_pos > limit * 0.3:
+        return text[:space_pos].rstrip(" -|,:;.") + "."
+    return text[:limit]
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9])")
@@ -683,7 +759,7 @@ def _localized_fragment(item: NewsItem, limit: int) -> str:
 
     # Try to extract an informative sentence from the body/summary
     key_sentence = _extract_key_sentence(item)
-    if key_sentence:
+    if key_sentence and _contains_cyrillic(key_sentence):
         suffix_parts: list[str] = []
         if _is_totally_free(item):
             suffix_parts.append("Доступ открыт бесплатно.")
@@ -823,7 +899,8 @@ def _extract_subject(item: NewsItem) -> str | None:
         while words and words[0].lower() in GENERIC_SUBJECTS:
             words = words[1:]
         subject = " ".join(words)
-        if subject and subject.lower() not in GENERIC_SUBJECTS:
+        # Skip subjects that are too long (likely paper titles, not company names)
+        if subject and subject.lower() not in GENERIC_SUBJECTS and len(subject.split()) <= 2:
             return subject
     return None
 
@@ -906,8 +983,12 @@ def _translate_object_phrase(value: str) -> str | None:
             return target
     if "model" in cleaned.lower():
         return re.sub(r"\bmodel\b", "модель", cleaned, flags=re.IGNORECASE)
+    # Only return short clean phrases, not incomplete ones ending in conjunctions/prepositions
+    trailing_words = {"and", "or", "the", "a", "an", "for", "with", "in", "on", "to", "of", "by"}
     if len(cleaned.split()) <= 4 and cleaned.isascii():
-        return cleaned
+        last_word = cleaned.split()[-1].lower()
+        if last_word not in trailing_words:
+            return cleaned
     return None
 
 

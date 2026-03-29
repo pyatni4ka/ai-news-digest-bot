@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import sqlite3
@@ -84,6 +84,14 @@ class Repository:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS ratings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    digest_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (digest_id) REFERENCES digests(id)
+                );
                 """
             )
 
@@ -100,6 +108,7 @@ class Repository:
                         location = excluded.location,
                         tags_json = excluded.tags_json,
                         priority = excluded.priority,
+                        enabled = excluded.enabled,
                         config_json = excluded.config_json,
                         updated_at = CURRENT_TIMESTAMP
                     """,
@@ -326,6 +335,42 @@ class Repository:
 
     def hydrate_digest(self, row: sqlite3.Row) -> tuple[str, dict]:
         return str(row["text"]), json.loads(str(row["payload_json"]))
+
+    def save_rating(self, digest_id: int, rating: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO ratings (digest_id, rating) VALUES (?, ?)",
+                (digest_id, rating),
+            )
+
+    def get_digest_rating(self, digest_id: int) -> tuple[int, int]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN rating > 0 THEN 1 ELSE 0 END), 0) AS up, "
+                "COALESCE(SUM(CASE WHEN rating < 0 THEN 1 ELSE 0 END), 0) AS down "
+                "FROM ratings WHERE digest_id = ?",
+                (digest_id,),
+            ).fetchone()
+        return (int(row["up"]), int(row["down"]))
+
+    def get_items_last_n_days(self, days: int = 7, limit: int = 500) -> list[sqlite3.Row]:
+        since = datetime.utcnow().replace(microsecond=0) - timedelta(days=days)
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM news_items WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?",
+                (since.isoformat(), limit),
+            ).fetchall()
+
+    def search_items_by_keyword(self, keyword: str, days: int = 7, limit: int = 20) -> list[sqlite3.Row]:
+        since = datetime.utcnow().replace(microsecond=0) - timedelta(days=days)
+        pattern = f"%{keyword}%"
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT * FROM news_items "
+                "WHERE (title LIKE ? OR summary LIKE ? OR body LIKE ?) AND published_at >= ? "
+                "ORDER BY importance DESC LIMIT ?",
+                (pattern, pattern, pattern, since.isoformat(), limit),
+            ).fetchall()
 
     def _map_source(self, row: sqlite3.Row) -> Source:
         return Source(

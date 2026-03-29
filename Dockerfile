@@ -7,7 +7,6 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
-COPY .env.amvera* ./
 COPY digest_bot/ digest_bot/
 COPY config/ config/
 

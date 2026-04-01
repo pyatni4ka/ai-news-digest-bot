@@ -38,7 +38,7 @@ class Settings:
     openrouter_api_key: str | None = None
     openrouter_model: str = "openai/gpt-oss-120b:free"
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
     quiet_start: int = 23
     quiet_end: int = 7
 

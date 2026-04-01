@@ -107,7 +107,6 @@ KEYWORDS: dict[str, tuple[str, ...]] = {
         "chatgpt",
         "anthropic",
         "claude",
-        "google",
         "gemini",
         "deepmind",
         "xai",
@@ -194,7 +193,6 @@ AI_RELEVANCE_PATTERNS = (
     "chatgpt",
     "anthropic",
     "claude",
-    "google",
     "gemini",
     "deepmind",
     "xai",
@@ -212,6 +210,22 @@ AI_RELEVANCE_PATTERNS = (
     "comfyui",
     "stable diffusion",
     "flux",
+)
+
+OFFTOPIC_PATTERNS = (
+    "документальный фильм",
+    "документалк",
+    "фильм",
+    "кино",
+    "кинопрокат",
+    "кинофестиваль",
+    "сандэнс",
+    "sundance",
+    "documentary",
+    "movie",
+    "trailer",
+    "series",
+    "box office",
 )
 
 
@@ -274,7 +288,7 @@ def score_item(item: NewsItem) -> float:
 
 
 def item_haystack(item: NewsItem) -> str:
-    return _normalize(" ".join([item.title, item.summary, item.body]))
+    return _normalize(" ".join([item.title, item.summary, _body_excerpt(item.body)]))
 
 
 def is_noise_item(
@@ -307,16 +321,19 @@ def is_free_offer_item(item: NewsItem, haystack: str | None = None) -> bool:
 
 def is_relevant_item(item: NewsItem, haystack: str | None = None) -> bool:
     value = haystack or item_haystack(item)
+    front_value = item_front_haystack(item)
     categories = set(item.categories)
     tags = set(item.tags)
     core_categories = {"models", "release", "comparisons", "coding", "vibe_coding", "dev_tools", "watchlist"}
-    if "watchlist" in categories and _has_ai_relevance(value):
+    if _looks_like_offtopic_item(item, front_value, categories):
+        return False
+    if "watchlist" in categories and _has_ai_relevance(front_value):
         return True
-    if categories & core_categories and _has_ai_relevance(value):
+    if categories & core_categories and _has_ai_relevance(front_value):
         return True
-    if "resources" in categories and _has_ai_relevance(value):
+    if "resources" in categories and _has_ai_relevance(front_value):
         return True
-    if {"official", "github_release", "sdk"} & tags and _has_ai_relevance(value):
+    if {"official", "github_release", "sdk"} & tags and _has_ai_relevance(front_value or value):
         return True
     return False
 
@@ -324,6 +341,31 @@ def is_relevant_item(item: NewsItem, haystack: str | None = None) -> bool:
 def _normalize(value: str) -> str:
     normalized = value.lower().replace("-", " ").replace("_", " ")
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def item_front_haystack(item: NewsItem) -> str:
+    return _normalize(" ".join([item.title, item.summary]))
+
+
+def _body_excerpt(value: str, limit: int = 900) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit]
+
+
+def _looks_like_offtopic_item(
+    item: NewsItem,
+    haystack: str | None = None,
+    categories: set[str] | None = None,
+) -> bool:
+    value = haystack or item_front_haystack(item)
+    item_categories = categories or set(item.categories)
+    if not any(pattern in value for pattern in OFFTOPIC_PATTERNS):
+        return False
+    if item_categories & {"release", "comparisons", "coding", "vibe_coding", "dev_tools", "resources"}:
+        return False
+    return True
 
 
 @lru_cache(maxsize=None)

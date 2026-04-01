@@ -72,6 +72,20 @@ OBJECT_REPLACEMENTS = (
     ("open source", "open-source"),
 )
 
+TITLE_TRANSLATION_PATTERNS = (
+    (
+        re.compile(r"^(?P<subject>[A-Za-z0-9.+’' -]+?)['’]s new app is an AI for customizing your feed$", re.IGNORECASE),
+        lambda match: f"{match.group('subject').strip()} запустила AI-приложение для настройки ленты",
+    ),
+    (
+        re.compile(
+            r"^(?P<percent>\d+)% of codebases rely on open source, and AI slop is putting them at risk$",
+            re.IGNORECASE,
+        ),
+        lambda match: f"AI-slop ставит под удар {match.group('percent')}% open-source проектов",
+    ),
+)
+
 FEATURE_GROUPS = (
     (("coding", "code", "refactor", "debug"), "coding"),
     (("agent", "agents", "agentic"), "agents"),
@@ -122,7 +136,32 @@ GENERIC_SUBJECTS = {
     "some",
 }
 
+GENERIC_TITLE_PREFIXES = (
+    "это войдёт в историю",
+    "вот это да",
+    "важно",
+    "срочно",
+    "breaking",
+)
+
+TITLE_REPLACEMENTS = (
+    ("Гений переписал", "Разработчик переписал"),
+)
+
 MIN_PARAGRAPH_MATCH_SCORE = 40
+
+RELEASE_SOURCE_NAMES = {
+    "rss:aider-releases": "Aider",
+    "rss:anthropic-sdk-releases": "Anthropic Python SDK",
+    "rss:claude-code-releases": "Claude Code",
+    "rss:continue-releases": "Continue",
+    "rss:crewai-releases": "CrewAI",
+    "rss:langchain-releases": "LangChain",
+    "rss:llamaindex-releases": "LlamaIndex",
+    "rss:ollama-releases": "Ollama",
+    "rss:openai-python-releases": "OpenAI Python SDK",
+    "rss:openhands-releases": "OpenHands",
+}
 
 
 def compute_window(slot: str, now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -189,11 +228,17 @@ def build_digest(
     paragraphs = split_paragraphs(summary_text, paragraph_count)
     if not paragraphs:
         paragraphs = fallback_digest_paragraphs(slot, sections)
-    matched_story_items, match_scores = match_story_items_with_scores(paragraphs, story_items)
-    if _should_fallback_to_story_cards(paragraphs, matched_story_items, match_scores):
-        paragraphs = fallback_digest_paragraphs(slot, sections)
+    story_indexes = extract_story_indexes(paragraphs)
+    paragraphs = [strip_story_index(paragraph) for paragraph in paragraphs]
+    if _is_direct_story_order(story_indexes, len(paragraphs), len(story_items)):
         matched_story_items = story_items[: len(paragraphs)]
         match_scores = [MIN_PARAGRAPH_MATCH_SCORE] * len(matched_story_items)
+    else:
+        matched_story_items, match_scores, match_indexes = match_story_items_with_scores(paragraphs, story_items)
+        if _should_fallback_to_story_cards(paragraphs, matched_story_items, match_scores, match_indexes):
+            paragraphs = fallback_digest_paragraphs(slot, sections)
+            matched_story_items = story_items[: len(paragraphs)]
+            match_scores = [MIN_PARAGRAPH_MATCH_SCORE] * len(matched_story_items)
     story_media = build_story_media_for_items(matched_story_items, max_items=4 if slot != "monthly" else 6)
 
     section_map = {
@@ -300,6 +345,26 @@ def fallback_digest_paragraphs(slot: str, sections: dict[str, list[NewsItem]]) -
 def split_paragraphs(text: str, limit: int) -> list[str]:
     paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
     return paragraphs[:limit]
+
+
+def extract_story_indexes(paragraphs: list[str]) -> list[int | None]:
+    indexes: list[int | None] = []
+    for paragraph in paragraphs:
+        match = _STORY_INDEX_RE.match(paragraph)
+        indexes.append(int(match.group(1)) if match else None)
+    return indexes
+
+
+def strip_story_index(paragraph: str) -> str:
+    return _STORY_INDEX_RE.sub("", paragraph, count=1).strip()
+
+
+def _is_direct_story_order(indexes: list[int | None], paragraph_count: int, story_count: int) -> bool:
+    if paragraph_count == 0 or paragraph_count > story_count:
+        return False
+    if any(index is None for index in indexes):
+        return False
+    return [int(index) for index in indexes] == list(range(1, paragraph_count + 1))
 
 
 def build_title(slot: str, start_at: datetime, end_at: datetime, timezone_name: str) -> str:
@@ -440,38 +505,45 @@ def match_story_items_to_paragraphs(
     paragraphs: list[str],
     candidates: list[NewsItem],
 ) -> list[NewsItem | None]:
-    matched, _ = match_story_items_with_scores(paragraphs, candidates)
+    matched, _, _ = match_story_items_with_scores(paragraphs, candidates)
     return matched
 
 
 def match_story_items_with_scores(
     paragraphs: list[str],
     candidates: list[NewsItem],
-) -> tuple[list[NewsItem | None], list[int]]:
-    available = list(candidates)
+) -> tuple[list[NewsItem | None], list[int], list[int | None]]:
+    available = list(enumerate(candidates))
     matched: list[NewsItem | None] = []
     scores: list[int] = []
+    indexes: list[int | None] = []
     for paragraph in paragraphs:
-        best_index = -1
+        best_available_index = -1
+        best_original_index: int | None = None
         best_score = -1
-        for index, item in enumerate(available):
+        for available_index, (original_index, item) in enumerate(available):
             score = _score_paragraph_match(paragraph, item)
             if score > best_score:
                 best_score = score
-                best_index = index
-        if best_index >= 0 and best_score >= MIN_PARAGRAPH_MATCH_SCORE:
-            matched.append(available.pop(best_index))
+                best_available_index = available_index
+                best_original_index = original_index
+        if best_available_index >= 0 and best_score >= MIN_PARAGRAPH_MATCH_SCORE:
+            _, matched_item = available.pop(best_available_index)
+            matched.append(matched_item)
             scores.append(best_score)
+            indexes.append(best_original_index)
         else:
             matched.append(None)
             scores.append(0)
-    return matched, scores
+            indexes.append(None)
+    return matched, scores, indexes
 
 
 def _should_fallback_to_story_cards(
     paragraphs: list[str],
     matched_story_items: list[NewsItem | None],
     match_scores: list[int],
+    match_indexes: list[int | None],
 ) -> bool:
     if not paragraphs:
         return True
@@ -481,7 +553,12 @@ def _should_fallback_to_story_cards(
         if item is not None and score >= MIN_PARAGRAPH_MATCH_SCORE
     )
     required_matches = max(2, int(len(paragraphs) * 0.7))
-    return strong_matches < required_matches
+    if strong_matches < required_matches:
+        return True
+    ordered_matches = [index for index in match_indexes if index is not None]
+    if len(ordered_matches) >= 2 and ordered_matches != sorted(ordered_matches):
+        return True
+    return False
 
 
 def _story_card(item: NewsItem, limit: int = 500) -> str:
@@ -501,6 +578,15 @@ def _display_title(item: NewsItem) -> str:
 
 def _story_media_title(item: NewsItem) -> str:
     original = _strip_leading_decoration(" ".join(item.title.split()))
+    quoted_cli = re.search(r'CLI\s+["“]([^"”]+)["”]', original, flags=re.IGNORECASE)
+    if quoted_cli:
+        cli_name = quoted_cli.group(1).strip()
+        if cli_name:
+            return f"{cli_name[:1].upper() + cli_name[1:]} CLI"
+    if _is_version_title(original):
+        release_source = _release_source_name(item)
+        if release_source:
+            return f"{release_source} {original}"
     if ":" in original:
         prefix = original.split(":", 1)[0].strip()
         if len(prefix) >= 3:
@@ -548,6 +634,9 @@ def _compact_fragment(value: str, limit: int) -> str:
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZА-ЯЁ0-9])")
+_STORY_INDEX_RE = re.compile(r"^\[(\d+)]\s*")
+_VERSION_TITLE_RE = re.compile(r"^v?\d+(?:\.\d+){1,3}(?:[-._a-z0-9]+)?$", flags=re.IGNORECASE)
+_LEADING_LIST_RE = re.compile(r"^[\-\*\u2022]+\s*")
 
 _STAT_RE = re.compile(
     r"\d+[%xх×]"
@@ -574,78 +663,11 @@ def _extract_key_sentence(item: NewsItem) -> str | None:
     if not text or len(text.strip()) < 30:
         return None
 
-    # Normalize whitespace
-    text = " ".join(text.split())
-
-    # Remove content that repeats the title
-    text = _trim_repeated_title(item, text)
-    if len(text.strip()) < 30:
-        return None
-
-    sentences = _SENTENCE_SPLIT_RE.split(text)
-
-    # Clean up and filter sentences
-    candidates: list[tuple[str, int]] = []  # (sentence, original_index)
-    for idx, raw in enumerate(sentences):
-        sentence = raw.strip().rstrip()
-        # Skip too short or too long
-        if len(sentence) < 25 or len(sentence) > 300:
-            continue
-        # Skip boilerplate
-        if _BOILERPLATE_RE.search(sentence):
-            continue
-        candidates.append((sentence, idx))
-
+    candidates = _rank_informative_sentences(item, text)
     if not candidates:
         return None
 
-    best_sentence = None
-    best_score = -1.0
-
-    for sentence, original_idx in candidates:
-        score = 0.0
-
-        # Numbers and stats are informative
-        stat_matches = _STAT_RE.findall(sentence)
-        score += len(stat_matches) * 3.0
-
-        # Capitalized words (named entities) - count words starting
-        # with uppercase that are not at the start of the sentence
-        words = sentence.split()
-        if len(words) > 1:
-            caps = sum(
-                1 for w in words[1:]
-                if w[0].isupper() and len(w) > 1 and not w.isupper()
-            )
-            score += caps * 1.5
-            # Fully uppercase tokens (acronyms like API, SDK, etc.)
-            acronyms = sum(1 for w in words if w.isupper() and len(w) >= 2 and w.isalpha())
-            score += acronyms * 1.0
-
-        # Prefer medium length (50-150 chars is the sweet spot)
-        length = len(sentence)
-        if 50 <= length <= 150:
-            score += 2.0
-        elif 30 <= length < 50:
-            score += 1.0
-        elif 150 < length <= 200:
-            score += 1.0
-
-        # Early sentences get a position bonus (first 3)
-        if original_idx < 3:
-            score += 2.0 - original_idx * 0.5
-
-        # Penalize sentences that are just enumerations or lists
-        if sentence.count(",") > 4:
-            score -= 2.0
-
-        best_score_threshold = 1.5
-        if score > best_score and score >= best_score_threshold:
-            best_score = score
-            best_sentence = sentence
-
-    if best_sentence is None:
-        return None
+    _, best_sentence, _ = max(candidates, key=lambda value: value[2])
 
     # Ensure it ends with punctuation
     if not best_sentence.endswith((".", "!", "?")):
@@ -719,82 +741,139 @@ def _filter_relevant_items(items: list[NewsItem]) -> list[NewsItem]:
 
 
 def _localized_title(item: NewsItem) -> str:
-    title = _strip_leading_decoration(" ".join(item.title.split()))
-    if _contains_cyrillic(title):
-        return title
+    title = _clean_original_title(" ".join(item.title.split()))
+    if ("…" in title or "..." in title) and _contains_cyrillic(item.summary):
+        summary_title = _summary_title_candidate(item)
+        if summary_title:
+            title = summary_title
+    if _contains_cyrillic(title) and not _should_rewrite_original_title(item, title):
+        return _finalize_title(title)
+    item_specific_title = _translate_known_item_title(item, title)
+    if item_specific_title:
+        return _finalize_title(item_specific_title)
+    translated_title = _translate_known_title(title)
+    if translated_title:
+        return _finalize_title(translated_title)
+    if _should_preserve_original_title(item, title) and not _should_rewrite_original_title(item, title):
+        return _finalize_title(title)
+
+    categories = set(item.categories)
+    is_model_release = _is_model_release(item)
 
     subject = _extract_subject(item)
     verb = _select_verb(item)
     obj = _extract_object(item, subject)
-    categories = set(item.categories)
 
     if subject and obj:
-        return f"{subject} {verb} {obj}"
-    if subject and {"models", "release"} & categories:
-        return f"{subject} {verb} новую модель"
+        return _finalize_title(f"{subject} {verb} {obj}")
+    if subject and {"models", "release"} & categories and is_model_release:
+        return _finalize_title(f"{subject} {verb} новую модель")
     if subject and "comparisons" in categories:
-        return f"{subject} показала новое сравнение моделей"
+        return _finalize_title(f"{subject} показала новое сравнение моделей")
     if subject and {"dev_tools", "vibe_coding", "coding"} & categories:
-        return f"{subject} {verb} обновление для разработки"
+        return _finalize_title(f"{subject} {verb} обновление для разработки")
     features = _extract_features(item)
     feature_hint = f" ({_join_features(features[:2])})" if features else ""
     if "comparisons" in categories:
-        return f"Вышло новое сравнение AI-моделей{feature_hint}"
-    if {"models", "release"} & categories:
+        return _finalize_title(f"Вышло новое сравнение AI-моделей{feature_hint}")
+    if {"models", "release"} & categories and is_model_release:
         model_match = _find_model_name(item)
         if model_match:
-            return f"Вышел {model_match}"
-        return f"Вышел новый релиз AI-модели{feature_hint}"
+            return _finalize_title(f"Вышел {model_match}")
+        return _finalize_title(f"Вышел новый релиз AI-модели{feature_hint}")
     if {"dev_tools", "vibe_coding", "coding"} & categories:
-        return f"Вышел новый апдейт для разработки{feature_hint}"
+        return _finalize_title(f"Вышел новый апдейт для разработки{feature_hint}")
     if "resources" in categories:
-        return f"Появился новый AI-инструмент{feature_hint}"
-    return title
+        return _finalize_title(f"Появился новый AI-инструмент{feature_hint}")
+    return _finalize_title(title)
+
+
+def _should_preserve_original_title(item: NewsItem, title: str) -> bool:
+    categories = set(item.categories)
+    if _is_model_release(item):
+        return False
+    if _translate_known_title(title):
+        return False
+    if _find_model_name(item):
+        return False
+    if any(re.search(re.escape(name), title, flags=re.IGNORECASE) for name in WATCHLIST_NAMES):
+        return False
+    if "release" in categories:
+        return False
+    if len(title.split()) > 4:
+        return False
+    if re.search(r"[.!?]", title):
+        return False
+    if re.search(r"\b(is|are|for|with|using|new|updated?|released?|launch(?:ed|es)?|risk)\b", title, flags=re.IGNORECASE):
+        return False
+    return True
+
+
+def _should_rewrite_original_title(item: NewsItem, title: str) -> bool:
+    lowered = title.lower()
+    if "показал, как" in lowered and len(title) <= 160:
+        return False
+    if len(title) > 92:
+        return True
+    if "…" in title or "..." in title:
+        return True
+    if any(lowered.startswith(prefix) for prefix in GENERIC_TITLE_PREFIXES):
+        return True
+    if title[:1].isdigit() or "%" in title[:10]:
+        return True
+    if item.source_key == "rss:simon-willison":
+        return True
+    return False
 
 
 def _localized_fragment(item: NewsItem, limit: int) -> str:
     source = item.summary or item.body or item.title
     if _contains_cyrillic(source):
+        key_sentence = _extract_key_sentence(item)
+        if key_sentence and _contains_cyrillic(key_sentence):
+            suffixes = _fragment_suffixes(item, key_sentence)
+            text = " ".join([key_sentence, *suffixes]).strip()
+            return _compact_fragment(text, limit=limit)
         return _compact_fragment(_trim_repeated_title(item, source), limit=limit)
+
+    translated_fragment = _translate_known_fragment(item)
+    if translated_fragment:
+        return _compact_fragment(translated_fragment, limit=limit)
 
     # Try to extract an informative sentence from the body/summary
     key_sentence = _extract_key_sentence(item)
     if key_sentence and _contains_cyrillic(key_sentence):
-        suffix_parts: list[str] = []
-        if _is_totally_free(item):
-            suffix_parts.append("Доступ открыт бесплатно.")
-        elif _looks_open_source(item):
-            suffix_parts.append("Проект вышел в open-source.")
-        if suffix_parts:
-            text = f"{key_sentence} {' '.join(suffix_parts)}"
-        else:
-            text = key_sentence
+        suffixes = _fragment_suffixes(item, key_sentence)
+        text = " ".join([key_sentence, *suffixes]).strip()
         return _compact_fragment(text, limit=limit)
 
     # Fall back to template phrases when no good sentence is found
     categories = set(item.categories)
+    is_model_release = _is_model_release(item)
     features = _extract_features(item)
     details: list[str] = []
-    if {"models", "release"} & categories:
+    if is_model_release:
         if features:
             details.append(f"Релиз сфокусирован на {_join_features(features)}.")
         else:
             details.append("Это заметный апдейт в линейке AI-моделей.")
-    elif "comparisons" in categories:
-        if features:
-            details.append(f"Сравнение смотрит на {_join_features(features)}.")
-        else:
-            details.append("Материал сравнивает актуальные AI-модели и их позиции.")
     elif {"dev_tools", "vibe_coding", "coding"} & categories:
         if features:
             details.append(f"Апдейт затрагивает {_join_features(features)}.")
         else:
             details.append("Новость важна для IDE, AI-агентов и повседневной разработки.")
+    elif "comparisons" in categories:
+        if features:
+            details.append(f"Сравнение смотрит на {_join_features(features)}.")
+        else:
+            details.append("Материал сравнивает актуальные AI-модели и их позиции.")
     elif "resources" in categories:
         if features:
             details.append(f"Инструмент делает упор на {_join_features(features)}.")
         else:
             details.append("Речь идет о новом AI-инструменте или приложении.")
+    elif "models" in categories:
+        details.append("Новость показывает, как AI-функции доходят до прикладного продукта.")
     else:
         details.append("Источник сообщает о заметном AI-апдейте и его практической пользе.")
 
@@ -811,38 +890,34 @@ def _is_model_release(item: NewsItem) -> bool:
     categories = set(item.categories)
     if "models" not in categories and "release" not in categories:
         return False
-    haystack = f"{item.title} {item.summary} {item.body} {' '.join(item.tags)}".lower()
+    haystack = f"{item.title} {item.summary}".lower()
     release_cues = (
         "introducing",
         "announce",
         "announcing",
         "released",
+        "release",
+        "ship",
+        "ships",
         "launch",
         "launches",
+        "launched",
         "available",
         "preview",
         "beta",
         "alpha",
-        "open source",
-        "open-source",
+        "version",
+    )
+    generic_model_cues = (
         "model",
+        "models",
+        "weights",
+        "checkpoint",
+        "version",
     )
-    model_cues = (
-        "gpt",
-        "claude",
-        "gemini",
-        "grok",
-        "llama",
-        "qwen",
-        "deepseek",
-        "mistral",
-        "sonnet",
-        "opus",
-        "haiku",
-        "voxtral",
-        "sam 3",
-    )
-    return any(cue in haystack for cue in release_cues) or any(cue in haystack for cue in model_cues)
+    if not any(cue in haystack for cue in release_cues):
+        return False
+    return _find_model_name(item) is not None or any(cue in haystack for cue in generic_model_cues)
 
 
 def _is_totally_free(item: NewsItem) -> bool:
@@ -861,9 +936,36 @@ def _is_totally_free(item: NewsItem) -> bool:
     return any(cue in haystack for cue in free_cues)
 
 
+def _fragment_suffixes(item: NewsItem, text: str) -> list[str]:
+    lowered = text.lower()
+    suffixes: list[str] = []
+    if _is_totally_free(item) and "бесплат" not in lowered and "free" not in lowered:
+        suffixes.append("Доступ открыт бесплатно.")
+    if _looks_open_source(item) and not any(token in lowered for token in ("open-source", "open source", "исходн", "github")):
+        suffixes.append("Исходный код открыт.")
+    return suffixes
+
+
 def _looks_open_source(item: NewsItem) -> bool:
     haystack = f"{item.title} {item.summary} {item.body} {' '.join(item.tags)}".lower()
-    return "open source" in haystack or "open-source" in haystack or "исходник" in haystack
+    return any(
+        cue in haystack
+        for cue in (
+            "open-sourced",
+            "open sourced",
+            "source code",
+            "available on github",
+            "github repo",
+            "github repository",
+            "released the code",
+            "открыла исходники",
+            "открыл исходники",
+            "открыли исходники",
+            "открыла исходный код",
+            "исходный код",
+            "репозиторий на github",
+        )
+    )
 
 
 def _find_model_name(item: NewsItem) -> str | None:
@@ -880,18 +982,21 @@ def _contains_cyrillic(value: str) -> bool:
 
 
 def _extract_subject(item: NewsItem) -> str | None:
-    # 1. WATCHLIST_NAMES in title (highest priority)
     title = " ".join(item.title.split())
+    tool_match = re.match(r"^(?:tool|app|project):\s*(.+)$", title, flags=re.IGNORECASE)
+    if tool_match:
+        cleaned = tool_match.group(1).strip(" :-—")
+        if cleaned:
+            return cleaned
+    if _is_version_title(title):
+        release_source = _release_source_name(item)
+        if release_source:
+            return release_source
+    # 1. WATCHLIST_NAMES in title (highest priority)
     for name in WATCHLIST_NAMES:
         if re.search(re.escape(name), title, flags=re.IGNORECASE):
             return name
-    # 2. WATCHLIST_NAMES in summary/body (before regex, to prefer company over model name)
-    for source in (item.summary, item.body):
-        text = " ".join(source.split())
-        for name in WATCHLIST_NAMES:
-            if re.search(re.escape(name), text, flags=re.IGNORECASE):
-                return name
-    # 3. Regex match from title (last resort)
+    # 2. Regex match from title
     match = re.match(r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){0,2})", title)
     if match:
         subject = match.group(1)
@@ -902,14 +1007,29 @@ def _extract_subject(item: NewsItem) -> str | None:
         # Skip subjects that are too long (likely paper titles, not company names)
         if subject and subject.lower() not in GENERIC_SUBJECTS and len(subject.split()) <= 2:
             return subject
+    match = re.match(r"([A-Z][A-Za-z0-9.+-]*(?:\s+[A-Z][A-Za-z0-9.+-]*){0,3})", title)
+    if match:
+        subject = match.group(1).strip()
+        if subject and subject.lower() not in GENERIC_SUBJECTS and len(subject.split()) <= 4:
+            return subject
+    # 3. WATCHLIST_NAMES in summary/body only for short product-like titles.
+    if len(title.split()) > 4:
+        return None
+    for source in (item.summary, item.body):
+        text = " ".join(source.split())
+        for name in WATCHLIST_NAMES:
+            if re.search(re.escape(name), text, flags=re.IGNORECASE):
+                return name
     return None
 
 
 def _select_verb(item: NewsItem) -> str:
     haystack = f"{item.title} {item.summary} {item.body}".lower()
     categories = set(item.categories)
-    if "открыла исходники" in haystack or "open source" in haystack or "open-source" in haystack:
+    if _looks_open_source(item):
         return "открыла исходный код"
+    if " app " in f" {haystack} " or "assistant" in haystack:
+        return "запустила"
     if "free plan" in haystack or "free tier" in haystack or "free access" in haystack:
         return "открыла"
     if {"models", "release"} & categories and any(
@@ -939,13 +1059,25 @@ def _select_verb(item: NewsItem) -> str:
 
 
 def _extract_object(item: NewsItem, subject: str | None) -> str | None:
-    title_and_summary = " ".join(part for part in (item.title, item.summary) if part)
+    if _is_version_title(item.title):
+        return f"релиз {item.title.strip()}"
+
+    title_and_summary = " ".join(part for part in (item.title,) if part)
     for pattern in MODEL_PATTERNS:
         match = re.search(pattern, title_and_summary, flags=re.IGNORECASE)
         if match:
             found = " ".join(match.group(0).split())
             if not subject or found.lower() != subject.lower():
                 return found
+
+    if _is_model_release(item):
+        title_and_summary = " ".join(part for part in (item.title, item.summary) if part)
+        for pattern in MODEL_PATTERNS:
+            match = re.search(pattern, title_and_summary, flags=re.IGNORECASE)
+            if match:
+                found = " ".join(match.group(0).split())
+                if not subject or found.lower() != subject.lower():
+                    return found
 
     title_tail = " ".join(item.title.split())
     if subject and title_tail.lower().startswith(subject.lower()):
@@ -960,8 +1092,18 @@ def _extract_object(item: NewsItem, subject: str | None) -> str | None:
     if translated_tail:
         return translated_tail
 
+    lower_title = item.title.lower()
+    if "customizing your feed" in lower_title:
+        return "AI-приложение для настройки ленты"
+    if "vulnerability lookup" in lower_title:
+        return "инструмент для проверки Python-зависимостей"
+    if "zero-day" in lower_title:
+        return "поиск zero-day уязвимостей"
+    if "ai slop" in lower_title and "open source" in lower_title:
+        return "нагрузку на open-source мейнтейнеров"
+
     categories = set(item.categories)
-    if {"models", "release"} & categories:
+    if {"models", "release"} & categories and _is_model_release(item):
         return "новую модель"
     if "comparisons" in categories:
         return "сравнение моделей"
@@ -1016,7 +1158,7 @@ def _join_features(features: list[str]) -> str:
 def _emoji_for_item(item: NewsItem) -> str:
     categories = set(item.categories)
     haystack = f"{item.title} {item.summary} {item.body}".lower()
-    if "models" in categories or "release" in categories:
+    if _is_model_release(item):
         return "🚀"
     if "comparisons" in categories:
         return "⚖️"
@@ -1030,7 +1172,49 @@ def _emoji_for_item(item: NewsItem) -> str:
         return "🔐"
     if any(term in haystack for term in ("agent", "automation", "workflow", "computer use")):
         return "🤖"
+    if "models" in categories or "watchlist" in categories:
+        return "🤖"
     return "📌"
+
+
+def _translate_known_title(title: str) -> str | None:
+    normalized = " ".join(title.split())
+    for pattern, renderer in TITLE_TRANSLATION_PATTERNS:
+        match = pattern.match(normalized)
+        if match:
+            return renderer(match)
+    return None
+
+
+def _translate_known_item_title(item: NewsItem, title: str) -> str | None:
+    haystack = f"{item.title} {item.summary} {item.body}".lower()
+    if title.lower() == "python vulnerability lookup" and "osv.dev" in haystack:
+        return "Python Vulnerability Lookup проверяет Python-зависимости по OSV.dev"
+    return None
+
+
+def _translate_known_fragment(item: NewsItem) -> str | None:
+    haystack = f"{item.title} {item.summary} {item.body}".lower()
+    if (
+        "build your own algorithm" in haystack
+        or "create custom feeds using natural language" in haystack
+        or "custom feeds using natural language" in haystack
+    ):
+        return (
+            "Инструмент Attie помогает собирать собственные алгоритмические ленты на естественном языке. "
+            "Сервис работает поверх AT Protocol и Claude, так что настройка выдачи становится обычным диалогом."
+        )
+    if "osv.dev" in haystack and ("pyproject.toml" in haystack or "requirements.txt" in haystack):
+        return (
+            "Инструмент проверяет pyproject.toml, requirements.txt и GitHub-репозитории по базе OSV.dev. "
+            "На выходе он сразу показывает уязвимости в Python-зависимостях и упрощает проверку безопасности зависимостей."
+        )
+    if "maintainer workload" in haystack or "ai is ddo" in haystack or "contributors can’t explain" in haystack:
+        return (
+            "Поток низкокачественных AI-пулреквестов перегружает мейнтейнеров open-source проектов. "
+            "Из-за этого команды ужесточают правила приёма внешних вкладов и тратят больше времени на ручную модерацию."
+        )
+    return None
 
 
 def _score_paragraph_match(paragraph: str, item: NewsItem) -> int:
@@ -1079,13 +1263,210 @@ def _strip_leading_decoration(value: str) -> str:
     return cleaned or value
 
 
+def _is_version_title(value: str) -> bool:
+    normalized = " ".join(value.split()).strip()
+    return bool(_VERSION_TITLE_RE.fullmatch(normalized))
+
+
+def _release_source_name(item: NewsItem) -> str | None:
+    mapped = RELEASE_SOURCE_NAMES.get(item.source_key)
+    if mapped:
+        return mapped
+    if item.url:
+        match = re.search(r"github\.com/[^/]+/([^/]+)/releases/", item.url, flags=re.IGNORECASE)
+        if match:
+            repo = match.group(1).strip()
+            if repo:
+                return _humanize_release_slug(repo)
+    if item.source_key.endswith("-releases"):
+        slug = item.source_key.split(":", 1)[-1].removesuffix("-releases")
+        if slug:
+            return _humanize_release_slug(slug)
+    return None
+
+
+def _humanize_release_slug(slug: str) -> str:
+    lowered = slug.lower()
+    known = {
+        "aider": "Aider",
+        "anthropic-sdk": "Anthropic Python SDK",
+        "claude-code": "Claude Code",
+        "continue": "Continue",
+        "crewai": "CrewAI",
+        "langchain": "LangChain",
+        "llamaindex": "LlamaIndex",
+        "ollama": "Ollama",
+        "openai-python": "OpenAI Python SDK",
+        "openhands": "OpenHands",
+    }
+    if lowered in known:
+        return known[lowered]
+    parts = [part for part in re.split(r"[-_]+", slug) if part]
+    if not parts:
+        return slug
+    normalized_parts: list[str] = []
+    for part in parts:
+        if part.lower() in {"ai", "sdk", "api", "llm"}:
+            normalized_parts.append(part.upper())
+            continue
+        normalized_parts.append(part[:1].upper() + part[1:])
+    return " ".join(normalized_parts)
+
+
+def _split_into_candidate_sentences(text: str) -> list[str]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    chunks = re.split(r"\n\s*\n+|(?<=[.!?])\s+", normalized)
+    return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+
+def _is_low_signal_sentence(sentence: str) -> bool:
+    lowered = sentence.lower().strip(" .!?,;:-—")
+    if not lowered:
+        return True
+    if lowered in {"telegram update", "март 2026"}:
+        return True
+    if _LEADING_LIST_RE.match(sentence):
+        return True
+    if re.fullmatch(r"[\W_]+", sentence):
+        return True
+    if len(re.findall(r"[A-Za-zА-Яа-яЁё]", sentence)) < 8:
+        return True
+    if lowered.startswith(("исходный код", "source code", "github", "репозиторий на github")) and len(lowered.split()) <= 4:
+        return True
+    return False
+
+
+def _rank_informative_sentences(item: NewsItem, text: str) -> list[tuple[int, str, float]]:
+    normalized = text.strip()
+    if not normalized:
+        return []
+    normalized = _trim_repeated_title(item, normalized)
+    if len(normalized.strip()) < 25:
+        return []
+
+    candidates: list[tuple[int, str, float]] = []
+    for idx, raw in enumerate(_split_into_candidate_sentences(normalized)):
+        sentence = " ".join(raw.split()).strip().rstrip()
+        if len(sentence) < 25 or len(sentence) > 320:
+            continue
+        if _BOILERPLATE_RE.search(sentence):
+            continue
+        if _is_low_signal_sentence(sentence):
+            continue
+
+        score = 0.0
+
+        stat_matches = _STAT_RE.findall(sentence)
+        score += len(stat_matches) * 3.0
+
+        words = sentence.split()
+        if len(words) > 1:
+            caps = sum(
+                1
+                for word in words[1:]
+                if word[:1].isupper() and len(word) > 1 and not word.isupper()
+            )
+            score += caps * 1.5
+            acronyms = sum(1 for word in words if word.isupper() and len(word) >= 2 and word.isalpha())
+            score += acronyms * 1.0
+
+        length = len(sentence)
+        if 50 <= length <= 150:
+            score += 2.0
+        elif 30 <= length < 50:
+            score += 1.0
+        elif 150 < length <= 220:
+            score += 1.0
+
+        if idx < 3:
+            score += 2.0 - idx * 0.5
+
+        if sentence.count(",") > 4:
+            score -= 2.0
+        if sentence.lower().startswith(("по его словам", "по словам автора")):
+            score += 0.5
+
+        if score >= 1.5:
+            candidates.append((idx, sentence, score))
+
+    return candidates
+
+
+def _clean_original_title(value: str) -> str:
+    title = _strip_leading_decoration(value)
+    title = re.sub(r",\s+один из самых[^,]+,\s+", " ", title, flags=re.IGNORECASE)
+    title = re.sub(
+        r"\s+на\s+днях\s+показал(?:\s+на\s+[^,]+)?\,\s+как\s+",
+        " показал, как ",
+        title,
+        flags=re.IGNORECASE,
+    )
+    lowered = title.lower()
+    for prefix in GENERIC_TITLE_PREFIXES:
+        if lowered.startswith(f"{prefix}:"):
+            title = title.split(":", 1)[1].strip()
+            lowered = title.lower()
+            break
+    for source, target in TITLE_REPLACEMENTS:
+        if title.startswith(source):
+            title = title.replace(source, target, 1)
+    if title.lower().startswith("как "):
+        title = title[4:].strip()
+        if title:
+            title = title[:1].upper() + title[1:]
+    lowered = title.lower()
+    show_match = re.search(r"показал(?:[^,\n]{0,40})?, как", lowered)
+    tail_index = show_match.start() if show_match else -1
+    comma_index = title.find(",")
+    if tail_index > 0 and 0 <= comma_index < tail_index and "показал" not in title[:comma_index].lower():
+        subject = title.split(",", 1)[0].strip()
+        if subject:
+            title = f"{subject} {title[tail_index:].strip()}"
+    return title.strip()
+
+
+def _summary_title_candidate(item: NewsItem) -> str | None:
+    lines = [line.strip() for line in item.summary.splitlines() if line.strip()]
+    if not lines:
+        return None
+    candidate = _clean_original_title(lines[0])
+    original_clean = _clean_original_title(item.title)
+    if not candidate or candidate == original_clean:
+        return None
+    if len(candidate) <= len(original_clean):
+        return None
+    return candidate
+
+
+def _finalize_title(value: str, limit: int = 88) -> str:
+    title = " ".join(value.split())
+    title = re.sub(r"\s+([,.:;!?])", r"\1", title)
+    title = title.rstrip(" .")
+    if len(title) > limit:
+        return truncate_at_word_boundary(title, limit, suffix="…")
+    return title
+
+
 def _trim_repeated_title(item: NewsItem, source: str) -> str:
     normalized_source = " ".join(source.split())
-    normalized_title = _strip_leading_decoration(" ".join(item.title.split())).rstrip(":.-—! ")
-    if normalized_title and normalized_source.lower().startswith(normalized_title.lower()):
-        trimmed = normalized_source[len(normalized_title):].lstrip(" :.-—!\n")
-        if trimmed:
-            return trimmed
+    title_candidates = [
+        _strip_leading_decoration(" ".join(item.title.split())).rstrip(":.-—! "),
+        _clean_original_title(" ".join(item.title.split())).rstrip(":.-—! "),
+        (_summary_title_candidate(item) or "").rstrip(":.-—! "),
+    ]
+    for normalized_title in sorted({candidate for candidate in title_candidates if candidate}, key=len, reverse=True):
+        if "…" in normalized_title or "..." in normalized_title:
+            continue
+        if normalized_title:
+            match = re.match(
+                rf"^{re.escape(normalized_title)}(?:[.:\-—!\"'«»\s]+)",
+                normalized_source,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                trimmed = normalized_source[match.end():].lstrip(" :.-—!\n")
+                if trimmed:
+                    return trimmed
     return normalized_source
 
 

@@ -9,10 +9,20 @@ User=__SERVICE_USER__
 Group=__SERVICE_USER__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=__APP_DIR__/.env
+Environment=APP_ROOT=__APP_DIR__
+Environment=PYTHONUNBUFFERED=1
 ExecStart=__APP_DIR__/.venv/bin/ai-news-digest bot
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=__APP_DIR__/data
+UMask=0077
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

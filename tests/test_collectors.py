@@ -10,6 +10,7 @@ from digest_bot.collectors.rss import _parse_feed_datetime
 from digest_bot.collectors.webpage import (
     _extract_article_candidates,
     _extract_images as _extract_webpage_images,
+    _limit_article_candidates,
     _parse_article,
 )
 from digest_bot.models import Source
@@ -40,6 +41,24 @@ class CollectorParsingTestCase(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0][0], "https://replicate.com/blog/ideogram-v3")
         self.assertEqual(candidates[0][1], datetime(2025, 5, 7, tzinfo=UTC))
+
+    def test_webpage_candidate_limit_prefers_fresh_then_undated(self) -> None:
+        since = datetime(2025, 5, 1, tzinfo=UTC)
+        candidates = [
+            ("https://example.com/old", datetime(2025, 4, 10, tzinfo=UTC)),
+            ("https://example.com/fresh-b", datetime(2025, 5, 7, tzinfo=UTC)),
+            ("https://example.com/undated", None),
+            ("https://example.com/fresh-a", datetime(2025, 5, 8, tzinfo=UTC)),
+        ]
+        limited = _limit_article_candidates(candidates, since=since, limit=3)
+        self.assertEqual(
+            limited,
+            [
+                ("https://example.com/fresh-a", datetime(2025, 5, 8, tzinfo=UTC)),
+                ("https://example.com/fresh-b", datetime(2025, 5, 7, tzinfo=UTC)),
+                ("https://example.com/undated", None),
+            ],
+        )
 
     def test_webpage_article_without_any_date_is_skipped(self) -> None:
         source = Source(

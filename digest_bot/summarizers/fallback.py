@@ -14,4 +14,8 @@ class FallbackSummarizer(Summarizer):
         complexity_level: int = 1,
     ) -> str:
         limit = paragraph_count if slot == "monthly" else max(paragraph_count, 6)
-        return "\n\n".join(build_story_cards(slot, sectioned_items, limit))
+        cards = build_story_cards(slot, sectioned_items, limit)
+        return "\n\n".join(
+            f"[{index}] {card}"
+            for index, card in enumerate(cards, start=1)
+        )

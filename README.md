@@ -76,11 +76,19 @@
 ```bash
 LLM_BACKEND=openrouter
 OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=stepfun/step-3.5-flash:free
-LLM_FALLBACK_MODELS=openrouter/free,arcee-ai/trinity-large-preview:free
+OPENROUTER_MODEL=openai/gpt-oss-120b:free
+LLM_FALLBACK_MODELS=arcee-ai/trinity-large-preview:free,stepfun/step-3.5-flash:free,openrouter/free
 ```
 
-Это включает бесплатные модели OpenRouter. Подходит для 2 плановых дайджестов в день и редких ручных обновлений.
+Это включает бесплатные модели OpenRouter с более сильным первым выбором и резервной цепочкой.
+После настройки сразу проверь доступ:
+
+```bash
+.venv/bin/ai-news-digest check-llm
+```
+
+Если команда возвращает `401 Unauthorized`, проблема не в prompt'ах и не в pipeline, а в ключе или аккаунте OpenRouter.
+Если `401` держится долго, не пытайся лечить это правкой prompt'ов: сначала ротируй ключ или меняй backend.
 
 ## Основные команды бота
 
@@ -136,8 +144,8 @@ cd /Users/antonpyatnica/ai-news-digest-bot
 - `TIMEZONE=Europe/Moscow`
 - `MORNING_HOUR=9`
 - `EVENING_HOUR=19`
-- `OPENROUTER_MODEL=stepfun/step-3.5-flash:free`
-- `LLM_FALLBACK_MODELS=openrouter/free,arcee-ai/trinity-large-preview:free`
+- `OPENROUTER_MODEL=openai/gpt-oss-120b:free`
+- `LLM_FALLBACK_MODELS=arcee-ai/trinity-large-preview:free,stepfun/step-3.5-flash:free,openrouter/free`
 
 5. После пуша workflow появится в:
 
@@ -159,6 +167,10 @@ cd /Users/antonpyatnica/ai-news-digest-bot
 ### VPS / interactive bot
 
 Для полного Telegram-бота с polling и callback-кнопками нужен VPS:
+
+- рекомендуемый baseline: `2 vCPU / 2 GB RAM / 20-30 GB SSD`
+- этого достаточно для постоянного polling, sync и локального fallback summary
+- если позже захочешь больше источников или дополнительные фоновые задачи, бери `4 GB RAM`
 
 - `python3 -m venv .venv`
 - `.venv/bin/python -m pip install -e .`

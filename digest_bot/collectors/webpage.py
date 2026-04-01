@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Iterable
 import re
 from urllib.parse import urljoin, urlparse
+import warnings
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import httpx
 
 from digest_bot.collectors.base import Collector
@@ -21,6 +23,8 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
 }
 
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
 
 class WebpageCollector(Collector):
     def __init__(self, timeout_seconds: float = 20.0) -> None:
@@ -31,6 +35,8 @@ class WebpageCollector(Collector):
         include_patterns = source.config.get("include_patterns", [])
         exclude_patterns = source.config.get("exclude_patterns", [])
         max_items = int(source.config.get("max_items", 40))
+        fetch_limit = int(source.config.get("fetch_limit", min(max_items, 12)))
+        concurrency = int(source.config.get("concurrency", 4))
         headers = dict(DEFAULT_HEADERS)
         headers.update(source.config.get("headers", {}))
         async with httpx.AsyncClient(
@@ -47,17 +53,32 @@ class WebpageCollector(Collector):
                 exclude_patterns=exclude_patterns,
                 limit=max_items,
             )
+            candidate_articles = _limit_article_candidates(candidate_articles, since=since, limit=fetch_limit)
+            semaphore = asyncio.Semaphore(max(1, concurrency))
+
+            async def _fetch_article(article_url: str, listing_published_at: datetime | None) -> NewsItem | None:
+                async with semaphore:
+                    try:
+                        article = await client.get(article_url)
+                        article.raise_for_status()
+                    except httpx.HTTPError:
+                        return None
+                    item = _parse_article(source, article_url, article.text, listing_published_at)
+                    if item is None or item.published_at < since:
+                        return None
+                    return item
+
             items: list[NewsItem] = []
-            for article_url, listing_published_at in candidate_articles:
-                try:
-                    article = await client.get(article_url)
-                    article.raise_for_status()
-                except httpx.HTTPError:
-                    continue
-                item = _parse_article(source, article_url, article.text, listing_published_at)
-                if item is None or item.published_at < since:
-                    continue
-                items.append(item)
+            results = await asyncio.gather(
+                *[
+                    _fetch_article(article_url, listing_published_at)
+                    for article_url, listing_published_at in candidate_articles
+                ]
+            )
+            for item in results:
+                if item is not None:
+                    items.append(item)
+        items.sort(key=lambda item: item.published_at, reverse=True)
         return items
 
 
@@ -87,6 +108,17 @@ def _extract_article_candidates(
         if len(candidates) >= limit:
             break
     return candidates
+
+
+def _limit_article_candidates(
+    candidates: list[tuple[str, datetime | None]],
+    since: datetime,
+    limit: int,
+) -> list[tuple[str, datetime | None]]:
+    fresh = [candidate for candidate in candidates if candidate[1] is not None and candidate[1] >= since]
+    fresh.sort(key=lambda candidate: candidate[1] or datetime.min.replace(tzinfo=UTC), reverse=True)
+    undated = [candidate for candidate in candidates if candidate[1] is None]
+    return (fresh + undated)[:limit]
 
 
 def _parse_article(

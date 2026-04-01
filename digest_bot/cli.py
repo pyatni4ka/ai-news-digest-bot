@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 
 from aiogram import Dispatcher
 
@@ -54,6 +55,15 @@ async def _sync_only() -> None:
         await service.close()
 
 
+async def _check_llm() -> None:
+    settings = load_settings()
+    service = DigestService(settings)
+    try:
+        print(json.dumps(await service.llm_status(), ensure_ascii=False, indent=2))
+    finally:
+        await service.close()
+
+
 async def _build_digest(slot: str, send: bool) -> None:
     settings = load_settings()
     service = DigestService(settings)
@@ -100,6 +110,7 @@ def main() -> None:
         help="Print Telethon StringSession for VPS/cloud deploys",
     )
     subparsers.add_parser("sync", help="Fetch sources and persist new items")
+    subparsers.add_parser("check-llm", help="Validate LLM backend credentials and model availability")
     run_parser = subparsers.add_parser(
         "run-slot",
         help="Sync, build and send a digest for a single slot",
@@ -130,6 +141,9 @@ def main() -> None:
         return
     if args.command == "sync":
         asyncio.run(_sync_only())
+        return
+    if args.command == "check-llm":
+        asyncio.run(_check_llm())
         return
     if args.command == "run-slot":
         asyncio.run(_run_slot(args.slot))

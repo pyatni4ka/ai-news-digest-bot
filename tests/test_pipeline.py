@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 import unittest
 
@@ -11,10 +12,12 @@ from digest_bot.pipeline.digest_builder import (
     build_story_cards,
     build_story_sequence,
     compute_window_with_hours,
+    extract_story_indexes,
     fallback_digest_paragraphs,
     gather_images,
     match_story_items_to_paragraphs,
     select_sections,
+    strip_story_index,
 )
 
 
@@ -106,6 +109,61 @@ class PipelineTestCase(unittest.TestCase):
         classify_items([item], reset=True)
         self.assertEqual(item.categories, ["general"])
 
+    def test_classify_ignores_late_body_footer_mentions_for_ai_relevance(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="web:test",
+            external_id="footer-1",
+            title="Pretext",
+            summary=(
+                "A new browser library measures wrapped text height without touching the DOM. "
+                "The article is about rendering performance, not AI."
+            ),
+            body=(
+                ("This browser tooling article is about layout performance and rendering. " * 20)
+                + "Later in the footer the author mentions Claude in passing while discussing a demo artifact."
+            ),
+            published_at=now,
+            collected_at=now,
+            tags=["javascript", "react", "typescript"],
+        )
+        classify_items([item], reset=True)
+        self.assertEqual(item.categories, ["general"])
+
+    def test_classify_does_not_treat_google_drive_as_ai_watchlist_news(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="tg:test",
+            external_id="drive-1",
+            title="Telegram Drive превращает мессенджер в Google Drive",
+            summary="Инструмент для хранения файлов в Telegram без AI-функций.",
+            body="Обычный файловый клиент для Telegram с поддержкой Windows и macOS.",
+            published_at=now,
+            collected_at=now,
+            tags=["telegram", "engineering"],
+        )
+        classify_items([item], reset=True)
+        self.assertEqual(item.categories, ["general"])
+
+    def test_classify_filters_offtopic_ai_documentary_story(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="tg:test",
+            external_id="movie-1",
+            title="В прокат вышел документальный фильм о будущем ИИ",
+            summary=(
+                "Документалка собирает интервью с Сэмом Альтманом, Anthropic и DeepMind, "
+                "но не содержит продуктового или исследовательского релиза."
+            ),
+            body="Фильм обсуждает будущее индустрии и мнения экспертов об ИИ.",
+            published_at=now,
+            collected_at=now,
+            tags=["telegram", "ai", "machine_learning"],
+        )
+        classify_items([item], reset=True)
+        sections = select_sections([item], slot="manual")
+        self.assertEqual(sections["headline"], [])
+
     def test_monthly_sections_and_fallback(self) -> None:
         now = datetime.now(UTC)
         items = []
@@ -114,9 +172,9 @@ class PipelineTestCase(unittest.TestCase):
                 NewsItem(
                     source_key="rss:test",
                     external_id=str(idx),
-                    title=f"New coding model {idx}",
-                    summary="Major AI update for coding agents and repo editing.",
-                    body="Major AI update for coding agents and repo editing with longer context.",
+                    title=f"New coding model {idx} released",
+                    summary="Major AI release for coding agents and repo editing.",
+                    body="Major AI release for coding agents and repo editing with longer context.",
                     url=f"https://example.com/{idx}",
                     published_at=now,
                     collected_at=now,
@@ -345,6 +403,213 @@ class PipelineTestCase(unittest.TestCase):
         self.assertIn("CLAUDE SONNET 4.6", cards[0])
         # English body is NOT leaked — Russian template is used instead
         self.assertNotIn("released", cards[0].lower())
+
+    def test_non_release_story_does_not_hallucinate_model_subject_from_summary(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:analysis",
+                external_id="analysis-1",
+                title="Pretext — Under the Hood",
+                summary="A deep dive into how Pretext uses Claude for prompt analysis.",
+                body="The article explains how Pretext works with Claude. No product launch is announced.",
+                url="https://example.com/pretext",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "watchlist"],
+                importance=10.0,
+            )
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("Pretext", cards[0])
+        self.assertNotIn("CLAUDE ВЫПУСТИЛА НОВУЮ МОДЕЛЬ", cards[0])
+
+    def test_python_vulnerability_lookup_uses_product_title_not_claude_code(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:simon-willison",
+                external_id="pyvl-1",
+                title="Python Vulnerability Lookup",
+                summary=(
+                    "Tool: Python Vulnerability Lookup. I had Claude Code build this HTML tool for "
+                    "pasting in a pyproject.toml or requirements.txt file and checking OSV.dev."
+                ),
+                body=(
+                    "The tool checks pyproject.toml and requirements.txt against OSV.dev and "
+                    "returns Python dependency vulnerabilities."
+                ),
+                url="https://example.com/pyvl",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "resources", "watchlist"],
+                importance=10.0,
+            )
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("Python Vulnerability Lookup", cards[0])
+        self.assertNotIn("Claude Code открыла исходный код", cards[0])
+
+    def test_long_cyrillic_title_is_cleaned_for_digest_card(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="tg:vibe",
+                external_id="sec-claude-1",
+                title=(
+                    "Николас Карлини, один из самых уважаемых специалистов по безопасности, на днях "
+                    "показал на живой демке, как CLAUDE находит zero-day уязвимости"
+                ),
+                summary="История про Claude и поиск zero-day уязвимостей в популярных проектах.",
+                body="Claude нашёл blind SQL injection и другие серьёзные баги на живой демке.",
+                url="https://example.com/sec-claude",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "resources", "watchlist"],
+                importance=10.0,
+            )
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("Николас Карлини показал, как CLAUDE", cards[0])
+
+    def test_cyrillic_fragment_prefers_stats_over_low_signal_tail(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="telegram:@vibecoding_tg",
+                external_id="rewrite-1",
+                title='Гений переписал CLI "claude" с использованием Codex и GPT-5.4-high.',
+                summary=(
+                    'Гений переписал CLI "claude" с использованием Codex и GPT-5.4-high.\n\n'
+                    "По его словам, это стоило $1100 в токенах, при этом скорость работы на 73% выше, "
+                    "а потребление памяти в режиме активного взаимодействия на 80% ниже.\n\n"
+                    "Очень легко реверсировать claude из npm-дистрибутива, затем его переписка происходит 1:1. "
+                    "Он неотличим от версии от Anthropic по заголовкам и аналитике, которую он отправляет обратно.\n\n"
+                    "исходный код 😳"
+                ),
+                body=(
+                    'Гений переписал CLI "claude" с использованием Codex и GPT-5.4-high.\n\n'
+                    "По его словам, это стоило $1100 в токенах, при этом скорость работы на 73% выше, "
+                    "а потребление памяти в режиме активного взаимодействия на 80% ниже.\n\n"
+                    "Очень легко реверсировать claude из npm-дистрибутива, затем его переписка происходит 1:1. "
+                    "Он неотличим от версии от Anthropic по заголовкам и аналитике, которую он отправляет обратно.\n\n"
+                    "исходный код 😳"
+                ),
+                url="https://t.me/vibecoding_tg/2872",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "models", "resources", "watchlist"],
+                importance=10.0,
+            )
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("73%", cards[0])
+        self.assertNotIn("исходный код 😳", cards[0])
+
+    def test_russian_title_with_model_mention_is_not_uppercased_without_release(self) -> None:
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="tg:security",
+                external_id="sec-1",
+                title="Николас Карлини показал, как Claude находит zero-day уязвимости",
+                summary="Демонстрация на Ghost CMS без релиза новой модели.",
+                body="Это история про безопасность и найденные уязвимости, а не про релиз новой модели.",
+                url="https://example.com/security",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "watchlist", "resources"],
+                importance=10.0,
+            )
+        ]
+        sections = select_sections(items, slot="manual")
+        cards = build_story_cards("manual", sections, 6)
+        self.assertTrue(cards)
+        self.assertIn("Николас Карлини", cards[0])
+        self.assertNotIn("НИКОЛАС КАРЛИНИ", cards[0])
+
+    def test_english_app_story_gets_russian_title_and_non_release_emoji(self) -> None:
+        from digest_bot.pipeline.digest_builder import _localized_title, _localized_fragment, _emoji_for_item
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:app",
+            external_id="app-1",
+            title="Bluesky’s new app is an AI for customizing your feed",
+            summary=(
+                "The latest app from the team behind Bluesky is Attie, an AI assistant that lets you build your own algorithm. "
+                "Attie allows users to create custom feeds using natural language."
+            ),
+            body=(
+                "The latest app from the team behind Bluesky is Attie, an AI assistant that lets you build your own algorithm. "
+                "Attie allows users to create custom feeds using natural language."
+            ),
+            url="https://example.com/bluesky",
+            published_at=now,
+            collected_at=now,
+            categories=["models", "watchlist"],
+            importance=10.0,
+        )
+        self.assertEqual(_localized_title(item), "Bluesky запустила AI-приложение для настройки ленты")
+        self.assertIn("Attie", _localized_fragment(item, 220))
+        self.assertEqual(_emoji_for_item(item), "🤖")
+
+    def test_python_vulnerability_lookup_gets_specific_fragment_not_release_template(self) -> None:
+        from digest_bot.pipeline.digest_builder import _localized_fragment
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:tool",
+            external_id="tool-1",
+            title="Python Vulnerability Lookup",
+            summary=(
+                "Tool: Python Vulnerability Lookup. A HTML tool for pasting in a pyproject.toml or requirements.txt "
+                "file and seeing a list of all reported vulnerabilities from the OSV.dev API."
+            ),
+            body=(
+                "Tool: Python Vulnerability Lookup. A HTML tool for pasting in a pyproject.toml or requirements.txt "
+                "file and seeing a list of all reported vulnerabilities from the OSV.dev API."
+            ),
+            url="https://example.com/tool",
+            published_at=now,
+            collected_at=now,
+            categories=["coding", "dev_tools", "models", "resources", "vibe_coding", "watchlist"],
+            importance=10.0,
+        )
+        fragment = _localized_fragment(item, 220)
+        self.assertIn("OSV.dev", fragment)
+        self.assertIn("уязвим", fragment.lower())
+        self.assertNotIn("Релиз сфокусирован", fragment)
+
+    def test_analytic_open_source_story_is_not_described_as_model_release(self) -> None:
+        from digest_bot.pipeline.digest_builder import _localized_title, _localized_fragment
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:analysis",
+            external_id="analysis-2",
+            title="96% of codebases rely on open source, and AI slop is putting them at risk",
+            summary=(
+                "Verbose changes. Nonsensical descriptions. Pull requests contributors can’t explain. "
+                "AI is DDoS-ing open source software and maintainers say it increases maintainer workload."
+            ),
+            body=(
+                "Verbose changes. Nonsensical descriptions. Pull requests contributors can’t explain. "
+                "AI is DDoS-ing open source software and maintainers say it increases maintainer workload."
+            ),
+            url="https://example.com/oss-risk",
+            published_at=now,
+            collected_at=now,
+            categories=["models", "resources"],
+            importance=9.0,
+        )
+        self.assertIn("AI-slop", _localized_title(item))
+        self.assertNotIn("Релиз сфокусирован", _localized_fragment(item, 220))
 
     def test_fallback_uses_template_when_body_is_empty(self) -> None:
         now = datetime.now(UTC)
@@ -680,6 +945,34 @@ class PipelineTestCase(unittest.TestCase):
         matched = match_story_items_to_paragraphs(paragraphs, [item])
         self.assertEqual(matched, [None])
 
+    def test_story_index_helpers_parse_and_strip_prefix(self) -> None:
+        paragraphs = [
+            "[1] 🚀 OpenAI выпустила GPT-5\nПодробности.",
+            "[2] 🧰 Cursor обновила IDE\nПодробности.",
+        ]
+        self.assertEqual(extract_story_indexes(paragraphs), [1, 2])
+        self.assertEqual(strip_story_index(paragraphs[0]), "🚀 OpenAI выпустила GPT-5\nПодробности.")
+
+    def test_analytic_non_release_titles_are_not_rewritten_into_fake_releases(self) -> None:
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:analysis",
+            external_id="analysis-1",
+            title="Python Vulnerability Lookup",
+            summary="A tool article about checking Python packages for vulnerabilities.",
+            body="The post describes a utility and why it is useful for security workflows.",
+            url="https://example.com/python-vulnerability-lookup",
+            published_at=now,
+            collected_at=now,
+            categories=["coding", "resources", "watchlist"],
+            importance=9.0,
+        )
+        from digest_bot.pipeline.digest_builder import _localized_title
+        title = _localized_title(item)
+        self.assertIn("Python Vulnerability Lookup", title)
+        self.assertNotIn("Claude Code", title)
+        self.assertNotIn("новую модель", title)
+
     def test_localized_title_uses_model_name_in_generic_fallback(self) -> None:
         now = datetime.now(UTC)
         item = NewsItem(
@@ -698,6 +991,27 @@ class PipelineTestCase(unittest.TestCase):
         title = _localized_title(item)
         # Should not be the generic "Вышел новый релиз AI-модели" — should contain GPT
         self.assertNotEqual(title, "Вышел новый релиз AI-модели")
+
+    def test_version_only_release_title_uses_source_name(self) -> None:
+        from digest_bot.pipeline.digest_builder import _localized_title, _story_media_title
+        now = datetime.now(UTC)
+        item = NewsItem(
+            source_key="rss:ollama-releases",
+            external_id="ollama-v019",
+            title="v0.19.0",
+            summary=(
+                "What's Changed launch: hide cline integration; launch/vscode: prefer known VS Code paths; "
+                "warning when server context length is below 64k for local models."
+            ),
+            body="Release notes for v0.19.0.",
+            url="https://github.com/ollama/ollama/releases/tag/v0.19.0-rc2",
+            published_at=now,
+            collected_at=now,
+            categories=["coding", "dev_tools", "release"],
+            importance=9.0,
+        )
+        self.assertEqual(_localized_title(item), "Ollama выпустила релиз v0.19.0")
+        self.assertEqual(_story_media_title(item), "Ollama v0.19.0")
 
     def test_extract_subject_from_body_when_title_has_no_subject(self) -> None:
         now = datetime.now(UTC)
@@ -763,6 +1077,121 @@ class DigestHtmlFormattingTestCase(unittest.TestCase):
         self.assertNotIn("───", result)  # no separator between stories
         self.assertIn("Читать →", result)
         self.assertIn("2 новости в выпуске", result)
+
+    def test_story_image_caption_fits_telegram_limit(self) -> None:
+        from digest_bot.service import DigestService
+        service = DigestService.__new__(DigestService)
+        title = "Очень длинный заголовок " * 80
+        url = "https://example.com/" + ("path/" * 120)
+        caption = service._story_image_caption(title, url)
+        visible = (
+            caption.replace("<b>", "")
+            .replace("</b>", "")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", '"')
+        )
+        self.assertLessEqual(len(visible), 1024)
+        self.assertIn("К новости:", visible)
+
+
+class HttpCompatSummarizerTestCase(unittest.TestCase):
+    def test_normalize_digest_output_adds_missing_indexes(self) -> None:
+        from digest_bot.summarizers.http_compat import normalize_digest_output
+
+        text = (
+            "🚀 OpenAI выпустила новую модель\n"
+            "Модель стала быстрее и точнее. Это важно для рабочих сценариев.\n\n"
+            "🧰 Cursor добавил background agent\n"
+            "Теперь инструмент сам разбирает задачи по репозиторию. Это ускоряет ревью."
+        )
+        result = normalize_digest_output(text, 2)
+        self.assertIn("[1] 🚀 OpenAI выпустила новую модель", result)
+        self.assertIn("[2] 🧰 Cursor добавил background agent", result)
+
+    def test_normalize_digest_output_rejects_wrong_story_count(self) -> None:
+        from digest_bot.summarizers.http_compat import normalize_digest_output
+
+        with self.assertRaises(ValueError):
+            normalize_digest_output("🗞 Одна история\nТекст.", 2)
+
+    def test_format_structured_digest_uses_story_order(self) -> None:
+        from digest_bot.summarizers.http_compat import format_structured_digest
+
+        now = datetime.now(UTC)
+        story_order = [
+            NewsItem(
+                source_key="rss:test",
+                external_id="1",
+                title="OpenAI released a new model",
+                summary="A model release story.",
+                body="OpenAI introduced a new model for coding.",
+                url="https://example.com/1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release"],
+                importance=10.0,
+            ),
+            NewsItem(
+                source_key="rss:test",
+                external_id="2",
+                title="Cursor ships a background coding agent",
+                summary="A dev tool story.",
+                body="Cursor added a background coding agent for repos.",
+                url="https://example.com/2",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools"],
+                importance=9.0,
+            ),
+        ]
+        content = (
+            '{"stories": ['
+            '{"index": 1, "headline": "OpenAI выпустила новую модель", "body": "OpenAI представила новую модель для coding-задач. Это усиливает конкуренцию в AI-разработке."},'
+            '{"index": 2, "headline": "Cursor добавил background agent", "body": "Cursor вынес часть задач по репозиторию в фоновый агент. Это ускоряет разбор изменений и правок."}'
+            "]}"
+        )
+        result = format_structured_digest(content, story_order)
+        self.assertIn("[1] 🚀 OpenAI выпустила новую модель", result)
+        self.assertIn("[2] 🧰 Cursor добавил background agent", result)
+
+
+class FallbackSummarizerTestCase(unittest.TestCase):
+    def test_fallback_summarizer_prefixes_story_indexes(self) -> None:
+        from digest_bot.summarizers.fallback import FallbackSummarizer
+
+        now = datetime.now(UTC)
+        items = [
+            NewsItem(
+                source_key="rss:test",
+                external_id="1",
+                title="Anthropic ships Claude Sonnet 4.6",
+                summary="Major model update for coding and agents.",
+                body="Anthropic released Claude Sonnet 4.6 with better coding and agent planning.",
+                url="https://example.com/1",
+                published_at=now,
+                collected_at=now,
+                categories=["models", "release", "coding", "watchlist"],
+                importance=12.0,
+            ),
+            NewsItem(
+                source_key="rss:test",
+                external_id="2",
+                title="Cursor ships a background coding agent",
+                summary="New AI tool for repository work and terminal tasks.",
+                body="Cursor released a background coding agent for repository work and terminal tasks.",
+                url="https://example.com/2",
+                published_at=now,
+                collected_at=now,
+                categories=["coding", "dev_tools", "watchlist"],
+                importance=10.0,
+            ),
+        ]
+        sections = select_sections(items, slot="manual")
+        text = asyncio.run(FallbackSummarizer().summarize("manual", sections, 2))
+        self.assertIn("[1]", text)
+        self.assertIn("[2]", text)
 
 
 if __name__ == "__main__":

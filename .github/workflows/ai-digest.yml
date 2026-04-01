@@ -33,8 +33,12 @@ jobs:
       TG_API_HASH: ${{ secrets.TG_API_HASH }}
       TG_PHONE: ${{ secrets.TG_PHONE }}
       TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+      # Gemini (recommended, free)
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # OpenRouter (fallback)
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      LLM_BACKEND: openrouter
+      LLM_BACKEND: ${{ vars.LLM_BACKEND }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
       OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
       LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       TIMEZONE: ${{ vars.TIMEZONE }}
@@ -75,12 +79,16 @@ jobs:
       - name: Apply default vars
         shell: bash
         run: |
+          : "${LLM_BACKEND:=gemini}"
+          : "${GEMINI_MODEL:=gemini-2.0-flash}"
           : "${OPENROUTER_MODEL:=stepfun/step-3.5-flash:free}"
-          : "${LLM_FALLBACK_MODELS:=z-ai/glm-4.5-air:free,nvidia/nemotron-nano-9b-v2:free}"
+          : "${LLM_FALLBACK_MODELS:=}"
           : "${TIMEZONE:=Europe/Moscow}"
           : "${MORNING_HOUR:=9}"
           : "${EVENING_HOUR:=19}"
           {
+            echo "LLM_BACKEND=$LLM_BACKEND"
+            echo "GEMINI_MODEL=$GEMINI_MODEL"
             echo "OPENROUTER_MODEL=$OPENROUTER_MODEL"
             echo "LLM_FALLBACK_MODELS=$LLM_FALLBACK_MODELS"
             echo "TIMEZONE=$TIMEZONE"
@@ -92,11 +100,18 @@ jobs:
         shell: bash
         run: |
           missing=()
-          for key in BOT_TOKEN ADMIN_CHAT_ID TG_API_ID TG_API_HASH TG_PHONE TG_SESSION_STRING OPENROUTER_API_KEY; do
+          for key in BOT_TOKEN ADMIN_CHAT_ID TG_API_ID TG_API_HASH TG_PHONE TG_SESSION_STRING; do
             if [[ -z "${!key:-}" ]]; then
               missing+=("$key")
             fi
           done
+          # Check at least one LLM key is set
+          if [[ "$LLM_BACKEND" == "gemini" && -z "${GEMINI_API_KEY:-}" ]]; then
+            missing+=("GEMINI_API_KEY")
+          fi
+          if [[ "$LLM_BACKEND" == "openrouter" && -z "${OPENROUTER_API_KEY:-}" ]]; then
+            missing+=("OPENROUTER_API_KEY")
+          fi
           if [[ ${#missing[@]} -gt 0 ]]; then
             echo "Missing GitHub Actions secrets: ${missing[*]}" >&2
             exit 1

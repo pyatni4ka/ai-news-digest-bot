@@ -31,6 +31,7 @@ sources:
     kind: telegram
     location: "@pekagame"
     priority: 2
+    enabled: false
     tags: ["telegram", "tech"]
     config:
       entity: "@pekagame"
@@ -40,6 +41,7 @@ sources:
     kind: telegram
     location: "@exploitex"
     priority: 3
+    enabled: false
     tags: ["telegram", "security", "tech"]
     config:
       entity: "@exploitex"
@@ -58,6 +60,7 @@ sources:
     kind: telegram
     location: "@machinelearning_interview"
     priority: 3
+    enabled: false
     tags: ["telegram", "ai", "career"]
     config:
       entity: "@machinelearning_interview"
@@ -96,6 +99,9 @@ sources:
     config:
       listing_url: "https://www.anthropic.com/news"
       include_patterns: ["/news/"]
+      fetch_limit: 8
+      concurrency: 4
+      timeout_seconds: 40
 
   - key: rss:google-ai-blog
     name: "Google AI Blog"
@@ -259,12 +265,12 @@ sources:
   - key: webpage:perplexity-blog
     name: "Perplexity Blog"
     kind: webpage
-    location: "https://www.perplexity.ai/hub/blog"
+    location: "https://www.perplexity.ai/hub"
     priority: 4
     tags: ["search", "ai", "products"]
     config:
-      listing_url: "https://www.perplexity.ai/hub/blog"
-      include_patterns: ["/hub/blog/"]
+      listing_url: "https://www.perplexity.ai/hub"
+      include_patterns: ["/hub/"]
 
   - key: rss:venturebeat-ai
     name: "VentureBeat AI"
@@ -369,12 +375,12 @@ sources:
   - key: webpage:deepseek-blog
     name: "DeepSeek Blog"
     kind: webpage
-    location: "https://api-docs.deepseek.com/news"
+    location: "https://api-docs.deepseek.com/updates/"
     priority: 6
     tags: ["official", "deepseek", "models"]
     config:
-      listing_url: "https://api-docs.deepseek.com/news"
-      include_patterns: ["/news"]
+      listing_url: "https://api-docs.deepseek.com/updates/"
+      include_patterns: ["/news/", "/updates/"]
 
   # --- GitHub releases (dev tools) ---
 

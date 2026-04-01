@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from html import escape
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Any
@@ -34,6 +35,9 @@ from digest_bot.pipeline.digest_builder import (
 from digest_bot.storage import Repository
 from digest_bot.summarizers.fallback import FallbackSummarizer
 from digest_bot.summarizers.http_compat import OpenAICompatibleSummarizer
+
+
+logger = logging.getLogger(__name__)
 
 
 class DigestService:
@@ -254,7 +258,14 @@ class DigestService:
                     paragraph_count,
                     complexity_level,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "LLM summarization failed for slot=%s backend=%s model=%s; falling back to local summarizer",
+                    selected_slot,
+                    self.settings.llm_backend,
+                    self._active_model_label(),
+                    exc_info=exc,
+                )
                 fallback = FallbackSummarizer()
                 summary = await fallback.summarize(
                     selected_slot,
@@ -439,6 +450,15 @@ class DigestService:
             if photo_input is not None:
                 media.append(InputMediaPhoto(media=photo_input))
         if media:
+            if len(media) == 1:
+                try:
+                    await self.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=media[0].media,
+                    )
+                except TelegramBadRequest:
+                    return
+                return
             try:
                 await self.bot.send_media_group(
                     chat_id=chat_id,
@@ -516,18 +536,28 @@ class DigestService:
         )
 
     def _build_summarizer(self):
+        if self.settings.llm_backend == "gemini" and self.settings.gemini_api_key:
+            return OpenAICompatibleSummarizer(
+                api_key=self.settings.gemini_api_key,
+                model=self.settings.gemini_model,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                fallback_models=self.settings.llm_fallback_models,
+                structured_outputs=False,
+            )
         if self.settings.llm_backend == "openrouter" and self.settings.openrouter_api_key:
             return OpenAICompatibleSummarizer(
                 api_key=self.settings.openrouter_api_key,
-                model=self.settings.openrouter_model or "stepfun/step-3.5-flash:free",
+                model=self.settings.openrouter_model or "openai/gpt-oss-120b:free",
                 base_url="https://openrouter.ai/api/v1",
                 fallback_models=self.settings.llm_fallback_models
                 or [
-                    "z-ai/glm-4.5-air:free",
-                    "nvidia/nemotron-nano-9b-v2:free",
+                    "arcee-ai/trinity-large-preview:free",
+                    "stepfun/step-3.5-flash:free",
+                    "openrouter/free",
                 ],
                 referer="https://openrouter.ai",
                 title="AI News Digest Bot",
+                structured_outputs=True,
             )
         if (
             self.settings.llm_backend == "compat"
@@ -549,6 +579,8 @@ class DigestService:
         return OpenAISummarizer(self.settings.openai_api_key, self.settings.openai_model)
 
     def _active_model_label(self) -> str:
+        if self.settings.llm_backend == "gemini":
+            return self.settings.gemini_model
         if self.settings.llm_backend == "openrouter":
             return self.settings.openrouter_model
         if self.settings.llm_backend == "compat":
@@ -605,6 +637,23 @@ class DigestService:
             return "Сравнение недоступно без LLM."
         return await self.summarizer.compare(items_a, items_b, model_a, model_b)
 
+    async def llm_status(self) -> dict[str, Any]:
+        status: dict[str, Any] = {
+            "backend": self.settings.llm_backend,
+            "configured_model": self._active_model_label(),
+            "fallback_models": self.settings.llm_fallback_models or [],
+            "available": not isinstance(self.summarizer, FallbackSummarizer),
+        }
+        if hasattr(self.summarizer, "healthcheck"):
+            try:
+                status["healthcheck"] = await self.summarizer.healthcheck()
+            except Exception as exc:
+                status["healthcheck"] = {
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+        return status
+
     def _paragraph_count_for_slot(self, slot: str) -> int:
         if slot == "monthly":
             return max(self.settings.default_digest_paragraphs, 10)
@@ -653,9 +702,18 @@ class DigestService:
         return header
 
     def _story_image_caption(self, title: str, url: str) -> str:
-        if url:
-            return f"<b>К новости:</b> {escape(title)}\n{escape(url)}"
-        return f"<b>К новости:</b> {escape(title)}"
+        prefix_plain = "К новости: "
+        clean_title = " ".join(title.split()) or "Без названия"
+        clean_url = url.strip()
+        suffix_plain = f"\n{clean_url}" if clean_url else ""
+        if len(prefix_plain) + len(clean_title) + len(suffix_plain) > 1024:
+            suffix_plain = ""
+        available = max(1, 1024 - len(prefix_plain) - len(suffix_plain))
+        safe_title = truncate_at_word_boundary(clean_title, available, suffix="…")
+        caption = f"<b>К новости:</b> {escape(safe_title)}"
+        if suffix_plain:
+            caption += escape(suffix_plain)
+        return caption
 
     def _split_label(self, paragraph: str) -> tuple[str | None, str]:
         for label in (

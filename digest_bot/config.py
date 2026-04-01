@@ -29,14 +29,16 @@ class Settings:
     max_images_per_digest: int
     default_digest_paragraphs: int
     llm_backend: str = "none"
-    llm_model: str = "stepfun/step-3.5-flash:free"
+    llm_model: str = "openai/gpt-oss-120b:free"
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_fallback_models: list[str] | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     openrouter_api_key: str | None = None
-    openrouter_model: str = "stepfun/step-3.5-flash:free"
+    openrouter_model: str = "openai/gpt-oss-120b:free"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.0-flash"
     quiet_start: int = 23
     quiet_end: int = 7
 
@@ -50,8 +52,11 @@ def project_root() -> Path:
 
 def load_settings() -> Settings:
     root = project_root()
-    load_dotenv(root / ".env")
-    load_dotenv(root / ".env.amvera")
+    env_file = os.getenv("ENV_FILE")
+    if env_file:
+        load_dotenv(_resolve_path(env_file, root))
+    else:
+        load_dotenv(root / ".env")
 
     db_path = _resolve_path(os.getenv("DB_PATH", "data/digest.db"), root)
     media_dir = _resolve_path(os.getenv("MEDIA_DIR", "data/media"), root)
@@ -83,7 +88,7 @@ def load_settings() -> Settings:
         llm_backend=os.getenv("LLM_BACKEND", "none"),
         llm_model=os.getenv(
             "LLM_MODEL",
-            os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"),
+            os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
         ),
         llm_base_url=os.getenv("LLM_BASE_URL"),
         llm_api_key=os.getenv("LLM_API_KEY"),
@@ -91,7 +96,9 @@ def load_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
-        openrouter_model=os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b:free"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         quiet_start=int(os.getenv("QUIET_START", "23")),
         quiet_end=int(os.getenv("QUIET_END", "7")),
     )

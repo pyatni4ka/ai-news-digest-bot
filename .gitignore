@@ -24,3 +24,6 @@ test.py
 data/digest.db
 data/media/*
 !data/media/.gitkeep
+venv/
+tasks/
+.claude/
